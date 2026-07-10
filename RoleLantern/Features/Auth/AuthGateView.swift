@@ -16,21 +16,24 @@ struct AuthGateView: View {
     @State private var busy = false
     @State private var showForgot = false
 
+    @State private var contentVisible = false
+
     var body: some View {
         ScrollView {
-            VStack(spacing: 20) {
-                VStack(spacing: 10) {
-                    Image("LanternLogo")
-                        .resizable()
-                        .interpolation(.high)
-                        .scaledToFit()
-                        .frame(width: 130, height: 130)
-                    Wordmark(font: .title.weight(.medium))
-                    Text("See roles more clearly")
-                        .font(.subheadline)
+            VStack(spacing: 16) {
+                OfficeHeroView()
+                    .frame(maxWidth: .infinity)
+
+                VStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Welcome to RoleLantern")
+                        .font(.title3.weight(.medium))
+                        .foregroundColor(Brand.navy)
+                    Text("Sign in to upload your CV, save jobs, and get matched — privately.")
+                        .font(.footnote)
                         .foregroundColor(Brand.slate)
                 }
-                .padding(.top, 40)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 Picker("Mode", selection: $mode) {
                     ForEach(Mode.allCases, id: \.self) { Text($0.rawValue) }
@@ -72,11 +75,18 @@ struct AuthGateView: View {
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(busy || email.isEmpty || password.isEmpty)
 
-                if mode == .signIn {
-                    Button("Forgot password?") { showForgot = true }
-                        .font(.subheadline)
-                        .foregroundColor(Brand.teal)
+                HStack(spacing: 16) {
+                    Button("No password? Email me a sign-in link") {
+                        Task { await auth.sendMagicLink(email: email) }
+                    }
+                    .disabled(email.isEmpty)
+                    Spacer()
+                    if mode == .signIn {
+                        Button("Forgot password?") { showForgot = true }
+                    }
                 }
+                .font(.footnote)
+                .foregroundColor(Brand.teal)
 
                 HStack {
                     Rectangle().fill(Brand.slate.opacity(0.2)).frame(height: 1)
@@ -99,18 +109,19 @@ struct AuthGateView: View {
                     Label("Continue with Google", systemImage: "globe")
                 }
                 .buttonStyle(SecondaryButtonStyle())
-
-                Button {
-                    Task { await auth.sendMagicLink(email: email) }
-                } label: {
-                    Label("Email me a magic link", systemImage: "envelope")
                 }
-                .buttonStyle(SecondaryButtonStyle())
-                .disabled(email.isEmpty)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
+                .opacity(contentVisible ? 1 : 0.2)
             }
-            .padding(24)
         }
+        .ignoresSafeArea(edges: .top)
         .background(Color.white.ignoresSafeArea())
+        .onAppear {
+            withAnimation(.easeOut(duration: 1.0).delay(1.2)) {
+                contentVisible = true
+            }
+        }
         .sheet(isPresented: $showForgot) { ForgotPasswordSheet(email: email) }
         .alert("Something went wrong", isPresented: .init(
             get: { auth.errorMessage != nil },

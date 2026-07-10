@@ -182,15 +182,19 @@ struct JobDetailView: View {
                     .padding(.vertical, 8)
             } else if let report = matchReport {
                 VStack(alignment: .leading, spacing: 12) {
-                    if let bucket = report.matchBucket {
-                        TagChip(text: bucket.replacingOccurrences(of: "_", with: " ").capitalized, color: Brand.gold)
-                    }
+                    MatchVerdictHeader(report: report)
                     EvidenceList(title: "Why you match", items: report.matchedEvidence,
                                  icon: "checkmark.circle.fill", color: Brand.teal)
-                    EvidenceList(title: "Missing evidence", items: report.missingEvidence,
+                    EvidenceList(title: "This job requires — and your CV doesn't show", items: report.missingEvidence,
                                  icon: "xmark.circle", color: .red.opacity(0.8))
                     EvidenceList(title: "Confirm this", items: report.unclearEvidence,
                                  icon: "questionmark.circle", color: Brand.gold)
+                    Text("Based only on the text of your CV and this posting. If you have these skills, add them to your CV and re-run the match.")
+                        .font(.caption2)
+                        .foregroundColor(Brand.slate)
+                    Button("Re-run match") { Task { await runMatch() } }
+                        .font(.footnote)
+                        .foregroundColor(Brand.teal)
                 }
             } else {
                 VStack(spacing: 10) {
@@ -283,6 +287,47 @@ struct JobDetailView: View {
         }
 
         matchReport = EvidenceMatchEngine.match(cvText: text, job: job, candidateId: profile.id)
+    }
+}
+
+/// Honest, factual verdict header for the evidence match.
+struct MatchVerdictHeader: View {
+    let report: CVMatchReport
+
+    private var verdict: (label: String, detail: String, color: Color) {
+        let missingCount = report.missingEvidence.count
+        switch report.matchBucket {
+        case "strong_match":
+            return ("Strong match", "Your CV shows evidence for everything this posting asks for.", Brand.teal)
+        case "good_match":
+            return ("Good match", "Your CV covers most of what this posting asks for.", Brand.teal)
+        case "possible_stretch":
+            return ("Possible stretch", "This posting asks for \(missingCount) thing\(missingCount == 1 ? "" : "s") we couldn't find in your CV — see below.", Brand.gold)
+        case "likely_not_a_fit":
+            return ("Likely not a fit", "Most of what this posting asks for isn't evident in your CV. The gaps are listed below so you can judge for yourself.", Color.red.opacity(0.85))
+        default:
+            return ("Not enough to assess", "This posting doesn't state enough checkable requirements for a meaningful comparison.", Brand.slate)
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(verdict.color)
+                .frame(width: 4)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(verdict.label)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(verdict.color)
+                Text(verdict.detail)
+                    .font(.caption)
+                    .foregroundColor(Brand.navy)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(verdict.color.opacity(0.08))
+        .cornerRadius(10)
     }
 }
 

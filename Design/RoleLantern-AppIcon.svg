@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- RoleLantern app icon — vector match of the founder-provided logo.
+       Navy #0F1B2E · Teal #18A999 · Gold #F2A81C · Cream #FFFDF4 -->
+  <rect width="1024" height="1024" fill="#FFFFFF"/>
+  <g stroke-linejoin="round" stroke-linecap="round">
+    <!-- Ring handle (merges into the dome) -->
+    <circle cx="512" cy="266" r="52" fill="#FFFFFF" stroke="#0F1B2E" stroke-width="42"/>
+
+    <!-- Domed cap -->
+    <path d="M 380 462
+             C 380 384, 434 336, 512 336
+             C 590 336, 644 384, 644 462
+             Z"
+          fill="#18A999" stroke="#0F1B2E" stroke-width="30"/>
+
+    <!-- Collar band under the cap -->
+    <rect x="356" y="458" width="312" height="40" rx="16"
+          fill="#18A999" stroke="#0F1B2E" stroke-width="28"/>
+
+    <!-- Barrel body -->
+    <path d="M 398 498
+             C 356 540, 340 590, 340 624
+             C 340 686, 374 740, 424 752
+             L 600 752
+             C 650 740, 684 686, 684 624
+             C 684 590, 668 540, 626 498
+             Z"
+          fill="#FFFDF4" stroke="#0F1B2E" stroke-width="30"/>
+
+    <!-- Gold sun with rays -->
+    <g stroke="#F2A81C" stroke-width="28">
+      <line x1="512" y1="508" x2="512" y2="546"/>
+      <line x1="512" y1="694" x2="512" y2="732"/>
+      <line x1="398" y1="620" x2="436" y2="620"/>
+      <line x1="588" y1="620" x2="626" y2="620"/>
+      <line x1="434" y1="542" x2="460" y2="568"/>
+      <line x1="564" y1="672" x2="590" y2="698"/>
+      <line x1="590" y1="542" x2="564" y2="568"/>
+      <line x1="460" y1="672" x2="434" y2="698"/>
+    </g>
+    <circle cx="512" cy="620" r="58" fill="#F2A81C"/>
+
+    <!-- Base: teal band + navy foot -->
+    <rect x="408" y="750" width="208" height="38" rx="14"
+          fill="#18A999" stroke="#0F1B2E" stroke-width="26"/>
+    <rect x="376" y="786" width="272" height="44" rx="20" fill="#0F1B2E"/>
+  </g>
+</svg>

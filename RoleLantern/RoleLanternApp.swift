@@ -16,7 +16,9 @@ struct RoleLanternApp: App {
                 // input text legible on devices set to dark mode.
                 .preferredColorScheme(.light)
                 .overlay {
-                    if lock.isLocked { LockScreenView() }
+                    // Note: overlay content sits outside RootView's environment,
+                    // so the lock manager must be injected here explicitly.
+                    if lock.isLocked { LockScreenView().environmentObject(lock) }
                 }
                 .task { await auth.start() }
                 .onOpenURL { url in auth.handleDeepLink(url) }

@@ -109,6 +109,17 @@ struct AuthGateView: View {
                     Label("Continue with Google", systemImage: "globe")
                 }
                 .buttonStyle(SecondaryButtonStyle())
+
+                VStack(spacing: 6) {
+                    Text("By continuing, you agree to our [Terms of service](https://rolelantern.netlify.app/legal/terms) and [Privacy notice](https://rolelantern.netlify.app/legal/privacy).")
+                    Text("Your profile is private by default. We never sell your CV or show you to your current employer. [Your privacy choices](https://rolelantern.netlify.app/legal/your-privacy-choices)")
+                }
+                .font(.caption2)
+                .foregroundColor(Brand.slate)
+                .tint(Brand.teal)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 4)
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 24)

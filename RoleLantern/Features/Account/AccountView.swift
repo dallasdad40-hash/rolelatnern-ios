@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AccountView: View {
     @EnvironmentObject var auth: AuthViewModel
+    @EnvironmentObject var lock: BiometricLockManager
     @Environment(\.openURL) private var openURL
 
     @State private var showMFASetup = false
@@ -22,6 +23,20 @@ struct AccountView: View {
                 }
 
                 Section("Security") {
+                    if lock.isAvailable {
+                        Toggle(isOn: Binding(
+                            get: { lock.isEnabled },
+                            set: { wantsOn in
+                                if wantsOn {
+                                    Task { await lock.enable() }
+                                } else {
+                                    lock.disable()
+                                }
+                            }
+                        )) {
+                            Label("Require \(lock.biometryLabel) to open", systemImage: "faceid")
+                        }
+                    }
                     Button {
                         showPasswordSheet = true
                     } label: {

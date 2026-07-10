@@ -3,14 +3,26 @@ import SwiftUI
 @main
 struct RoleLanternApp: App {
     @StateObject private var auth = AuthViewModel()
+    @StateObject private var lock = BiometricLockManager()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(auth)
+                .environmentObject(lock)
                 .tint(Brand.teal)
+                // The brand palette is light-first; forcing light mode keeps
+                // input text legible on devices set to dark mode.
+                .preferredColorScheme(.light)
+                .overlay {
+                    if lock.isLocked { LockScreenView() }
+                }
                 .task { await auth.start() }
                 .onOpenURL { url in auth.handleDeepLink(url) }
+                .onChange(of: scenePhase) { phase in
+                    if phase == .background { lock.lockIfEnabled() }
+                }
         }
     }
 }

@@ -91,6 +91,9 @@ struct CareerInsightsView: View {
                 }
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(uploadBusy)
+                Text("This opens your iPhone's file browser — pick your CV and you'll come right back here.")
+                    .font(.caption)
+                    .foregroundColor(Brand.slate)
             }
 
             Label("Private by default — your CV is stored in a private, access-controlled bucket and never shown to your current employer.",

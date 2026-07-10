@@ -20,13 +20,17 @@ struct AuthGateView: View {
         ScrollView {
             VStack(spacing: 20) {
                 VStack(spacing: 10) {
-                    LanternMark(size: 88)
+                    Image("LanternLogo")
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 130, height: 130)
                     Wordmark(font: .title.weight(.medium))
                     Text("See roles more clearly")
                         .font(.subheadline)
                         .foregroundColor(Brand.slate)
                 }
-                .padding(.top, 48)
+                .padding(.top, 40)
 
                 Picker("Mode", selection: $mode) {
                     ForEach(Mode.allCases, id: \.self) { Text($0.rawValue) }

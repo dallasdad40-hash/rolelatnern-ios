@@ -226,6 +226,21 @@ struct DataService {
 
     // MARK: Evidence match
 
+    /// Server-extracted CV text (populated by the web parse pipeline), if available.
+    func fetchCVText(cvId: UUID) async throws -> String? {
+        struct Row: Decodable {
+            let extracted_text: String?
+            let parsed_text: String?
+        }
+        let rows: [Row] = try await client.from("cv_files")
+            .select("extracted_text,parsed_text")
+            .eq("id", value: cvId)
+            .limit(1)
+            .execute()
+            .value
+        return rows.first.flatMap { $0.extracted_text ?? $0.parsed_text }
+    }
+
     func fetchMatchReport(candidateId: UUID, jobId: UUID) async throws -> CVMatchReport? {
         let rows: [CVMatchReport] = try await client.from("cv_match_reports")
             .select("id,candidate_id,job_id,match_bucket,matched_evidence,missing_evidence,unclear_evidence,created_at")

@@ -1,4 +1,5 @@
 import SwiftUI
+import PDFKit
 
 struct JobDetailView: View {
     let job: BoardJob
@@ -193,7 +194,7 @@ struct JobDetailView: View {
                 }
             } else {
                 VStack(spacing: 10) {
-                    Text("Run an evidence match to see why this role fits your CV — no black-box scores.")
+                    Text("Run an evidence match to see why this role fits your CV — checked right on your device, no black-box scores.")
                         .font(.subheadline)
                         .foregroundColor(Brand.slate)
                     Button("Run evidence match") {
@@ -251,19 +252,37 @@ struct JobDetailView: View {
         matchReport = try? await data.fetchMatchReport(candidateId: profile.id, jobId: job.id)
     }
 
+    /// Runs entirely on-device: reads the CV text (server-parsed if available,
+    /// otherwise extracted locally from the PDF) and compares it to the job.
     private func runMatch() async {
-        guard auth.profile != nil else { return }
+        guard let profile = auth.profile else { return }
         matchLoading = true
         defer { matchLoading = false }
-        do {
-            try await data.requestMatchReport(jobId: job.id)
-            await loadMatch()
-            if matchReport == nil {
-                statusMessage = "Match is being generated — check back in a moment. Make sure you've uploaded a CV first."
-            }
-        } catch {
-            statusMessage = "Could not run the match. Upload a CV first, then try again."
+
+        guard let cv = try? await data.fetchActiveCV(candidateId: profile.id) else {
+            statusMessage = "Upload a CV first (Insights tab), then run the match."
+            return
         }
+
+        var cvText = (try? await data.fetchCVText(cvId: cv.id)) ?? nil
+
+        // No server-parsed text yet? Extract locally from the PDF.
+        if cvText == nil || cvText?.isEmpty == true {
+            if (cv.fileType ?? "").contains("pdf") || (cv.fileName ?? "").lowercased().hasSuffix(".pdf") {
+                if let url = try? await data.signedCVURL(path: cv.fileUrl),
+                   let (fileData, _) = try? await URLSession.shared.data(from: url),
+                   let pdf = PDFDocument(data: fileData) {
+                    cvText = pdf.string
+                }
+            }
+        }
+
+        guard let text = cvText, !text.isEmpty else {
+            statusMessage = "Couldn't read your CV's text yet. PDFs work best — try re-uploading as PDF."
+            return
+        }
+
+        matchReport = EvidenceMatchEngine.match(cvText: text, job: job, candidateId: profile.id)
     }
 }
 

@@ -1,8 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// CV upload + Career Insights (evidence match) — mirrors web /cv-match.
-struct CareerInsightsView: View {
+/// CV upload card (lives on the Dashboard). Evidence match runs from job detail.
+struct CVCard: View {
     @EnvironmentObject var auth: AuthViewModel
     @State private var cv: CVFile?
     @State private var isLoading = true
@@ -14,15 +14,7 @@ struct CareerInsightsView: View {
     private let data = DataService()
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    cvCard
-                    howItWorks
-                }
-                .padding(20)
-            }
-            .navigationTitle("Career insights")
+        cvCard
             .fileImporter(
                 isPresented: $showImporter,
                 allowedContentTypes: [.pdf, UTType(filenameExtension: "docx") ?? .data],
@@ -42,7 +34,6 @@ struct CareerInsightsView: View {
                 Text(statusMessage ?? "")
             }
             .task { await load() }
-        }
     }
 
     private var cvCard: some View {

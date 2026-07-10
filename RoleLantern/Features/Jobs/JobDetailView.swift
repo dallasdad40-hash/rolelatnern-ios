@@ -264,7 +264,7 @@ struct JobDetailView: View {
         defer { matchLoading = false }
 
         guard let cv = try? await data.fetchActiveCV(candidateId: profile.id) else {
-            statusMessage = "Upload a CV first (Insights tab), then run the match."
+            statusMessage = "Upload a CV first (Dashboard tab), then run the match."
             return
         }
 
@@ -394,7 +394,7 @@ struct PartnerApplySheet: View {
                         Label(cv.fileName ?? "CV on file", systemImage: "doc.fill")
                             .foregroundColor(Brand.navy)
                     } else {
-                        Text("You need a CV to apply. Upload one from the Insights tab first.")
+                        Text("You need a CV to apply. Upload one from the Dashboard tab first.")
                             .foregroundColor(.red)
                     }
                 }

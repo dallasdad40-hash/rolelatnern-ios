@@ -22,6 +22,7 @@ struct DashboardView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     welcome
                     availabilityCard
+                    CVCard()
                     applicationsCard
                 }
                 .padding(20)

@@ -154,6 +154,48 @@ struct ApplicationRecord: Codable, Identifiable {
     }
 }
 
+// MARK: - Messaging
+
+struct MessageThread: Codable, Identifiable {
+    let id: UUID
+    let candidateId: UUID
+    let companyId: UUID
+    let jobId: UUID?
+    let createdAt: Date
+    let lastMessageAt: Date
+    let lastMessagePreview: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case candidateId = "candidate_id"
+        case companyId = "company_id"
+        case jobId = "job_id"
+        case createdAt = "created_at"
+        case lastMessageAt = "last_message_at"
+        case lastMessagePreview = "last_message_preview"
+    }
+
+    /// Previews are encrypted server-side; only show them if readable.
+    var readablePreview: String? {
+        guard let preview = lastMessagePreview, !preview.hasPrefix("enc:") else { return nil }
+        return preview
+    }
+}
+
+struct MessageMeta: Codable, Identifiable {
+    let id: UUID
+    let threadId: UUID
+    let senderRole: String
+    let readAtCandidate: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case threadId = "thread_id"
+        case senderRole = "sender_role"
+        case readAtCandidate = "read_at_candidate"
+    }
+}
+
 // MARK: - Evidence match
 
 struct CVMatchReport: Codable, Identifiable {

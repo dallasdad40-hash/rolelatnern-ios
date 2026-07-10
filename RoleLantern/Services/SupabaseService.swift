@@ -258,6 +258,30 @@ struct DataService {
         try await callAuthenticatedEndpoint(AppConfig.evidenceMatchEndpoint, body: ["job_id": jobId.uuidString])
     }
 
+    // MARK: Messaging (bodies are encrypted server-side; app shows threads + unread counts)
+
+    func fetchThreads(candidateId: UUID) async throws -> [MessageThread] {
+        try await client.from("message_threads")
+            .select("id,candidate_id,company_id,job_id,created_at,last_message_at,last_message_preview")
+            .eq("candidate_id", value: candidateId)
+            .order("last_message_at", ascending: false)
+            .execute()
+            .value
+    }
+
+    /// Unread employer messages per thread.
+    func fetchUnreadCounts(threadIds: [UUID]) async throws -> [UUID: Int] {
+        guard !threadIds.isEmpty else { return [:] }
+        let rows: [MessageMeta] = try await client.from("messages")
+            .select("id,thread_id,sender_role,read_at_candidate")
+            .in("thread_id", values: threadIds)
+            .eq("sender_role", value: "employer")
+            .is("read_at_candidate", value: nil)
+            .execute()
+            .value
+        return Dictionary(grouping: rows, by: \.threadId).mapValues(\.count)
+    }
+
     // MARK: Account deletion (Apple requirement)
 
     /// Mirrors the web "Delete my name & CV": scrubs PII, soft-deletes CVs, hides the profile.

@@ -81,18 +81,29 @@ struct NonCandidateView: View {
 }
 
 struct MainTabView: View {
+    @EnvironmentObject var auth: AuthViewModel
+    @StateObject private var messagesVM = MessagesViewModel()
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some View {
         TabView {
             JobBoardView()
                 .tabItem { Label("Jobs", systemImage: "briefcase") }
             SavedJobsView()
                 .tabItem { Label("Saved", systemImage: "bookmark") }
-            CareerInsightsView()
-                .tabItem { Label("Insights", systemImage: "sparkles") }
+            MessagesView(vm: messagesVM)
+                .tabItem { Label("Messages", systemImage: "envelope") }
+                .badge(messagesVM.totalUnread)
             DashboardView()
                 .tabItem { Label("Dashboard", systemImage: "rectangle.grid.2x2") }
             AccountView()
                 .tabItem { Label("Account", systemImage: "person.crop.circle") }
+        }
+        .task { await messagesVM.refresh(candidateId: auth.profile?.id) }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                Task { await messagesVM.refresh(candidateId: auth.profile?.id) }
+            }
         }
     }
 }

@@ -8,6 +8,8 @@ struct JobDetailView: View {
 
     @State private var matchReport: CVMatchReport?
     @State private var matchLoading = false
+    /// Full record incl. structured_facts and full description (list fetch is slim).
+    @State private var hydratedJob: BoardJob?
     @State private var showExternalApply = false
     @State private var showApplySheet = false
     @State private var statusMessage: String?
@@ -75,7 +77,10 @@ struct JobDetailView: View {
         } message: {
             Text(statusMessage ?? "")
         }
-        .task { await loadMatch() }
+        .task {
+            hydratedJob = try? await data.fetchJob(id: job.id)
+            await loadMatch()
+        }
     }
 
     private var header: some View {
@@ -286,7 +291,7 @@ struct JobDetailView: View {
             return
         }
 
-        matchReport = EvidenceMatchEngine.match(cvText: text, job: job, candidateId: profile.id)
+        matchReport = EvidenceMatchEngine.match(cvText: text, job: hydratedJob ?? job, candidateId: profile.id)
     }
 }
 

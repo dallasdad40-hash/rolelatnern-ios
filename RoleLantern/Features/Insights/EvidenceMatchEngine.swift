@@ -93,15 +93,75 @@ enum EvidenceMatchEngine {
                              missingText: "The role centers on \(phrase) — not evident in your CV")
         }
 
-        // 4. Requirements mined from the job description text.
-        for term in domainVocabulary where jobText.contains(term.lowercased()) {
-            checkRequirement("\(term) — asked for in the posting and found in your CV",
-                             term: term,
-                             missingText: "The posting mentions \(term) — not found in your CV")
+        // 4. Stated requirements. Prefer the AI-classified list from the web
+        //    ingestion pipeline (structured_facts); fall back to vocabulary mining.
+        var yearsCoveredByFacts = false
+        var educationCoveredByFacts = false
+
+        if let stated = job.structuredFacts?.requirements, !stated.isEmpty {
+            for requirement in stated {
+                let req = requirement.lowercased()
+                let isPreferred = req.contains("preferred") || req.contains("a plus") || req.contains("nice to have")
+
+                // Years requirements get the dedicated numeric check.
+                if let reqYears = yearsRequired(in: req) {
+                    yearsCoveredByFacts = true
+                    requirementsChecked += 1
+                    if let cvYears = maxYearsMentioned(in: cv), cvYears >= reqYears {
+                        matched.append(EvidenceItem(text: "\(requirement) — your CV mentions \(cvYears) years"))
+                    } else if isPreferred {
+                        unclear.append(EvidenceItem(text: "\(requirement) — confirm your total experience"))
+                        requirementsChecked -= 1
+                    } else {
+                        requirementsMissing += 1
+                        missing.append(EvidenceItem(text: "Requires: \(requirement) — not evident in your CV"))
+                    }
+                    continue
+                }
+
+                // Degree requirements get the education-tier check.
+                if req.contains("degree") || req.contains("phd") || req.contains("master")
+                    || req.contains("bachelor") || req.contains("mba") || req.contains("pharmd") {
+                    educationCoveredByFacts = true
+                    requirementsChecked += 1
+                    if mentionsEducation(cv, required: req) {
+                        matched.append(EvidenceItem(text: "\(requirement) — found in your CV"))
+                    } else if isPreferred {
+                        unclear.append(EvidenceItem(text: "\(requirement) — add it to your CV if you have it"))
+                        requirementsChecked -= 1
+                    } else {
+                        requirementsMissing += 1
+                        missing.append(EvidenceItem(text: "Requires: \(requirement) — not found in your CV"))
+                    }
+                    continue
+                }
+
+                // Everything else: match the requirement's key terms against the CV.
+                let keyTerms = significantTerms(in: req)
+                guard !keyTerms.isEmpty else { continue }
+                let hits = keyTerms.filter { contains(cv, phrase: $0) }.count
+                let satisfied = hits * 2 >= keyTerms.count   // at least half the key terms
+                if satisfied {
+                    requirementsChecked += 1
+                    matched.append(EvidenceItem(text: "\(requirement) — evidence found in your CV"))
+                } else if isPreferred {
+                    unclear.append(EvidenceItem(text: "\(requirement) — add it to your CV if you have it"))
+                } else {
+                    requirementsChecked += 1
+                    requirementsMissing += 1
+                    missing.append(EvidenceItem(text: "Requires: \(requirement) — not evident in your CV"))
+                }
+            }
+        } else {
+            for term in domainVocabulary where jobText.contains(term.lowercased()) {
+                checkRequirement("\(term) — asked for in the posting and found in your CV",
+                                 term: term,
+                                 missingText: "The posting mentions \(term) — not found in your CV")
+            }
         }
 
         // 5. Years of experience (structured, else mined from description).
-        let minYears = job.yearsExperienceMin ?? yearsRequired(in: jobText)
+        let minYears = yearsCoveredByFacts ? nil : (job.yearsExperienceMin ?? yearsRequired(in: jobText))
         if let minYears, minYears > 0 {
             requirementsChecked += 1
             if let cvYears = maxYearsMentioned(in: cv) {
@@ -117,7 +177,7 @@ enum EvidenceMatchEngine {
         }
 
         // 6. Education (structured, else mined).
-        let education = job.requiredEducation ?? degreeRequired(in: jobText)
+        let education = educationCoveredByFacts ? nil : (job.requiredEducation ?? degreeRequired(in: jobText))
         if let education, !education.isEmpty {
             requirementsChecked += 1
             if mentionsEducation(cv, required: education) {
@@ -195,6 +255,21 @@ enum EvidenceMatchEngine {
             }
         }
         return phrases.filter { $0.count > 3 }
+    }
+
+    private static let requirementStopwords: Set<String> = [
+        "experience", "years", "strong", "excellent", "skills", "skill", "ability",
+        "abilities", "proficiency", "proficient", "knowledge", "demonstrated",
+        "required", "degree", "related", "field", "preferred", "with", "and",
+        "working", "background", "plus", "understanding", "familiarity", "track",
+        "record", "history", "environment", "including", "applications", "tools",
+    ]
+
+    /// Meaningful words from a requirement sentence, for CV matching.
+    private static func significantTerms(in requirement: String) -> [String] {
+        requirement.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.count > 3 && !requirementStopwords.contains($0) }
     }
 
     private static func maxYearsMentioned(in text: String) -> Int? {

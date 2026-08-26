@@ -26,7 +26,11 @@ struct FreshnessBadge: View {
             Label("Verified active", systemImage: "checkmark.seal.fill")
                 .font(.caption.weight(.medium))
                 .foregroundColor(Brand.teal)
-        case "stale", "unverified":
+        case "recently_checked":
+            Label("Recently checked", systemImage: "checkmark.seal")
+                .font(.caption.weight(.medium))
+                .foregroundColor(Brand.teal)
+        case "needs_recheck", "stale", "unverified":
             Label("Freshness unconfirmed", systemImage: "clock")
                 .font(.caption)
                 .foregroundColor(Brand.slate)

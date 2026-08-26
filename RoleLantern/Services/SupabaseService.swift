@@ -19,11 +19,15 @@ struct DataService {
 
     // MARK: Jobs
 
+    /// Slim column set for list screens — the board now has 14k+ active jobs,
+    /// so heavy columns (full_description, structured_facts) load on detail only.
+    private static let listColumns = "id,job_title,company_name,location_text,remote_status,employment_type,salary_min,salary_max,currency,posted_date,summary,apply_url,job_type,status,therapeutic_area_tags,function_tags,job_level,required_education,years_experience_min,must_have_skills,nice_to_have_skills,job_freshness_status,last_checked_at,boosted_until,expires_at"
+
     func fetchJobs(search: String = "", functionTag: String? = nil,
                    therapeuticArea: String? = nil, remoteOnly: Bool = false,
                    location: String = "") async throws -> [BoardJob] {
         var query = client.from("board_jobs")
-            .select()
+            .select(Self.listColumns)
             .eq("status", value: "active")
             .or("expires_at.is.null,expires_at.gt.\(nowISO)")
 

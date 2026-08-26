@@ -111,8 +111,8 @@ struct AuthGateView: View {
                 .buttonStyle(SecondaryButtonStyle())
 
                 VStack(spacing: 6) {
-                    Text("By continuing, you agree to our [Terms of service](https://rolelantern.netlify.app/legal/terms) and [Privacy notice](https://rolelantern.netlify.app/legal/privacy).")
-                    Text("Your profile is private by default. We never sell your CV or show you to your current employer. [Your privacy choices](https://rolelantern.netlify.app/legal/your-privacy-choices)")
+                    Text("By continuing, you agree to our [Terms of service](https://rolelantern.com/legal/terms) and [Privacy notice](https://rolelantern.com/legal/privacy).")
+                    Text("Your profile is private by default. We never sell your CV or show you to your current employer. [Your privacy choices](https://rolelantern.com/legal/your-privacy-choices)")
                 }
                 .font(.caption2)
                 .foregroundColor(Brand.slate)

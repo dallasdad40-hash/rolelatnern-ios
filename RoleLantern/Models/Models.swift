@@ -30,6 +30,8 @@ struct BoardJob: Codable, Identifiable, Hashable {
     let salaryMax: Int?
     let currency: String?
     let employmentType: String?
+    /// AI-classified requirements/responsibilities from the web ingestion pipeline.
+    let structuredFacts: StructuredFacts?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -59,6 +61,7 @@ struct BoardJob: Codable, Identifiable, Hashable {
         case salaryMax = "salary_max"
         case currency
         case employmentType = "employment_type"
+        case structuredFacts = "structured_facts"
     }
 
     var isBoosted: Bool {
@@ -66,6 +69,23 @@ struct BoardJob: Codable, Identifiable, Hashable {
         return false
     }
     var isPartnerApply: Bool { jobType == "partner_apply" }
+}
+
+struct StructuredFacts: Codable, Hashable {
+    let requirements: [String]?
+    let responsibilities: [String]?
+    let compensation: String?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        requirements = try? container.decodeIfPresent([String].self, forKey: .requirements)
+        responsibilities = try? container.decodeIfPresent([String].self, forKey: .responsibilities)
+        compensation = try? container.decodeIfPresent(String.self, forKey: .compensation)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case requirements, responsibilities, compensation
+    }
 }
 
 // MARK: - Candidate

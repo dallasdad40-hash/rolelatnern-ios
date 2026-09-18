@@ -22,6 +22,7 @@ struct BoardJob: Codable, Identifiable, Hashable {
     let mustHaveSkills: [String]?
     let niceToHaveSkills: [String]?
     let jobFreshnessStatus: String
+    let freshnessRank: Int?
     let lastCheckedAt: Date?
     let boostedUntil: Date?
     let expiresAt: Date?
@@ -53,6 +54,7 @@ struct BoardJob: Codable, Identifiable, Hashable {
         case mustHaveSkills = "must_have_skills"
         case niceToHaveSkills = "nice_to_have_skills"
         case jobFreshnessStatus = "job_freshness_status"
+        case freshnessRank = "freshness_rank"
         case lastCheckedAt = "last_checked_at"
         case boostedUntil = "boosted_until"
         case expiresAt = "expires_at"
@@ -171,6 +173,58 @@ struct ApplicationRecord: Codable, Identifiable {
         case status
         case submittedAt = "submitted_at"
         case createdAt = "created_at"
+    }
+}
+
+// MARK: - Parsed CV (structured extraction from the web pipeline)
+
+/// Tolerant decoder: fields arrive from an evolving jsonb-backed pipeline.
+struct ParsedCVData: Codable {
+    let skills: [String]?
+    let therapeuticAreas: [String]?
+    let jobTitles: [String]?
+    let employers: [String]?
+    let certifications: [String]?
+    let systems: [String]?
+    let trialPhases: [String]?
+    let education: String?
+    let yearsOfExperience: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case skills
+        case therapeuticAreas = "therapeutic_areas"
+        case jobTitles = "job_titles"
+        case employers
+        case certifications
+        case systems
+        case trialPhases = "trial_phases"
+        case education
+        case yearsOfExperience = "years_of_experience"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        skills = (try? c.decodeIfPresent([String].self, forKey: .skills)) ?? nil
+        therapeuticAreas = (try? c.decodeIfPresent([String].self, forKey: .therapeuticAreas)) ?? nil
+        jobTitles = (try? c.decodeIfPresent([String].self, forKey: .jobTitles)) ?? nil
+        employers = (try? c.decodeIfPresent([String].self, forKey: .employers)) ?? nil
+        certifications = (try? c.decodeIfPresent([String].self, forKey: .certifications)) ?? nil
+        systems = (try? c.decodeIfPresent([String].self, forKey: .systems)) ?? nil
+        trialPhases = (try? c.decodeIfPresent([String].self, forKey: .trialPhases)) ?? nil
+        education = (try? c.decodeIfPresent(String.self, forKey: .education)) ?? nil
+        yearsOfExperience = (try? c.decodeIfPresent(Int.self, forKey: .yearsOfExperience)) ?? nil
+    }
+
+    /// Flattened into text so the evidence engine can match against it
+    /// alongside the raw CV text.
+    var asMatchText: String {
+        var parts: [String] = []
+        for list in [skills, therapeuticAreas, jobTitles, employers, certifications, systems, trialPhases] {
+            if let list, !list.isEmpty { parts.append(list.joined(separator: ". ")) }
+        }
+        if let education, !education.isEmpty { parts.append(education) }
+        if let years = yearsOfExperience, years > 0 { parts.append("\(years) years of experience") }
+        return parts.joined(separator: "\n")
     }
 }
 

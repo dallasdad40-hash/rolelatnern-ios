@@ -21,7 +21,7 @@ struct DataService {
 
     /// Slim column set for list screens — the board now has 14k+ active jobs,
     /// so heavy columns (full_description, structured_facts) load on detail only.
-    private static let listColumns = "id,job_title,company_name,location_text,remote_status,employment_type,salary_min,salary_max,currency,posted_date,summary,apply_url,job_type,status,therapeutic_area_tags,function_tags,job_level,required_education,years_experience_min,must_have_skills,nice_to_have_skills,job_freshness_status,last_checked_at,boosted_until,expires_at"
+    private static let listColumns = "id,job_title,company_name,location_text,remote_status,employment_type,salary_min,salary_max,currency,posted_date,summary,apply_url,job_type,status,therapeutic_area_tags,function_tags,job_level,required_education,years_experience_min,must_have_skills,nice_to_have_skills,job_freshness_status,freshness_rank,last_checked_at,boosted_until,expires_at"
 
     func fetchJobs(search: String = "", functionTag: String? = nil,
                    therapeuticArea: String? = nil, remoteOnly: Bool = false,
@@ -32,8 +32,8 @@ struct DataService {
             .or("expires_at.is.null,expires_at.gt.\(nowISO)")
 
         if !search.isEmpty {
-            let q = search.replacingOccurrences(of: ",", with: " ")
-            query = query.or("job_title.ilike.%\(q)%,company_name.ilike.%\(q)%,summary.ilike.%\(q)%")
+            // Full-text search over the server-maintained index (37k+ jobs).
+            query = query.textSearch("search_tsv", query: search, config: "simple", type: .websearch)
         }
         if let functionTag {
             query = query.contains("function_tags", value: [functionTag])
@@ -49,14 +49,18 @@ struct DataService {
         }
 
         let jobs: [BoardJob] = try await query
+            .order("freshness_rank", ascending: true)
             .order("posted_date", ascending: false)
             .limit(200)
             .execute()
             .value
 
-        // Boosted jobs first (client-side; avoids null-ordering differences).
+        // Boosted first, then freshest, then newest.
         return jobs.sorted { a, b in
             if a.isBoosted != b.isBoosted { return a.isBoosted }
+            let rankA = a.freshnessRank ?? 99
+            let rankB = b.freshnessRank ?? 99
+            if rankA != rankB { return rankA < rankB }
             return (a.postedDate ?? "") > (b.postedDate ?? "")
         }
     }
@@ -243,6 +247,18 @@ struct DataService {
             .execute()
             .value
         return rows.first.flatMap { $0.extracted_text ?? $0.parsed_text }
+    }
+
+    /// Structured CV extraction from the web pipeline (skills, education, years…).
+    func fetchParsedCV(cvId: UUID) async throws -> ParsedCVData? {
+        let rows: [ParsedCVData] = try await client.from("parsed_cv_data")
+            .select("skills,therapeutic_areas,job_titles,employers,certifications,systems,trial_phases,education,years_of_experience")
+            .eq("cv_file_id", value: cvId)
+            .order("updated_at", ascending: false)
+            .limit(1)
+            .execute()
+            .value
+        return rows.first
     }
 
     func fetchMatchReport(candidateId: UUID, jobId: UUID) async throws -> CVMatchReport? {

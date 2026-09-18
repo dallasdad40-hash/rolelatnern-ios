@@ -286,12 +286,20 @@ struct JobDetailView: View {
             }
         }
 
-        guard let text = cvText, !text.isEmpty else {
+        // Enrich with the web pipeline's structured extraction (skills, education,
+        // years of experience) so the match doesn't depend on raw-text phrasing.
+        var corpus = cvText ?? ""
+        if let parsed = try? await data.fetchParsedCV(cvId: cv.id) {
+            let extra = parsed.asMatchText
+            if !extra.isEmpty { corpus += "\n" + extra }
+        }
+
+        guard !corpus.isEmpty else {
             statusMessage = "Couldn't read your CV's text yet. PDFs work best — try re-uploading as PDF."
             return
         }
 
-        matchReport = EvidenceMatchEngine.match(cvText: text, job: hydratedJob ?? job, candidateId: profile.id)
+        matchReport = EvidenceMatchEngine.match(cvText: corpus, job: hydratedJob ?? job, candidateId: profile.id)
     }
 }
 

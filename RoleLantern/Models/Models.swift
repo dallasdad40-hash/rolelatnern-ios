@@ -244,7 +244,7 @@ struct ParsedCVData: Codable {
 
 // MARK: - Messaging
 
-struct MessageThread: Codable, Identifiable {
+struct MessageThread: Codable, Identifiable, Hashable {
     let id: UUID
     let candidateId: UUID
     let companyId: UUID
@@ -268,6 +268,23 @@ struct MessageThread: Codable, Identifiable {
         guard let preview = lastMessagePreview, !preview.hasPrefix("enc:") else { return nil }
         return preview
     }
+}
+
+/// A fully decrypted message returned by the candidate-messages edge function.
+struct DecryptedMessage: Codable, Identifiable {
+    let id: UUID
+    let senderRole: String
+    let body: String?
+    let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case senderRole = "sender_role"
+        case body
+        case createdAt = "created_at"
+    }
+
+    var isFromCandidate: Bool { senderRole == "candidate" }
 }
 
 struct MessageMeta: Codable, Identifiable {

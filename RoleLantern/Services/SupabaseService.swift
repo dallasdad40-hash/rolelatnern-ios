@@ -369,6 +369,27 @@ struct DataService {
         return Dictionary(grouping: rows, by: \.threadId).mapValues(\.count)
     }
 
+    /// Decrypted conversation for a thread, via the candidate-messages edge function.
+    func fetchMessages(threadId: UUID) async throws -> [DecryptedMessage] {
+        struct Payload: Encodable { let action = "list"; let thread_id: String }
+        struct Wrapper: Decodable { let messages: [DecryptedMessage] }
+        let wrapper: Wrapper = try await client.functions.invoke(
+            "candidate-messages",
+            options: FunctionInvokeOptions(body: Payload(thread_id: threadId.uuidString))
+        )
+        return wrapper.messages
+    }
+
+    /// Sends a candidate message; the edge function encrypts it with the shared key.
+    func sendMessage(threadId: UUID, text: String) async throws {
+        struct Payload: Encodable { let action = "send"; let thread_id: String; let text: String }
+        struct Wrapper: Decodable { let ok: Bool? }
+        let _: Wrapper = try await client.functions.invoke(
+            "candidate-messages",
+            options: FunctionInvokeOptions(body: Payload(thread_id: threadId.uuidString, text: text))
+        )
+    }
+
     // MARK: Account deletion (Apple requirement)
 
     /// Mirrors the web "Delete my name & CV": scrubs PII, soft-deletes CVs, hides the profile.

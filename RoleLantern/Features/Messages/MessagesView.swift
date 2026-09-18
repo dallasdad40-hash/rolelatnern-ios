@@ -39,8 +39,6 @@ struct MessagesView: View {
     @EnvironmentObject var auth: AuthViewModel
     @ObservedObject var vm: MessagesViewModel
     @State private var openThread: MessageThread?
-    @State private var pendingThread: MessageThread?
-    @State private var showWebExplainer = false
 
     var body: some View {
         NavigationStack {
@@ -56,12 +54,7 @@ struct MessagesView: View {
                 } else {
                     List(vm.threads) { thread in
                         Button {
-                            if UserDefaults.standard.bool(forKey: "sawMessagesWebExplainer") {
-                                openThread = thread
-                            } else {
-                                pendingThread = thread
-                                showWebExplainer = true
-                            }
+                            openThread = thread
                         } label: {
                             ThreadRow(
                                 thread: thread,
@@ -83,17 +76,136 @@ struct MessagesView: View {
                 SafariView(url: AppConfig.webBaseURL.appendingPathComponent("candidate/messages"))
                     .ignoresSafeArea()
             }
-            .alert("Opening your secure inbox", isPresented: $showWebExplainer) {
-                Button("Continue") {
-                    UserDefaults.standard.set(true, forKey: "sawMessagesWebExplainer")
-                    openThread = pendingThread
-                    pendingThread = nil
-                }
-                Button("Cancel", role: .cancel) { pendingThread = nil }
-            } message: {
-                Text("Message contents are encrypted, so conversations open in RoleLantern's secure web inbox. If it asks you to sign in, that's the website — sign in once and it stays signed in.")
+            .navigationDestination(item: $openThread) { thread in
+                ConversationView(
+                    thread: thread,
+                    title: thread.jobId.flatMap { vm.jobTitles[$0] } ?? "Employer conversation"
+                )
+                .onDisappear { Task { await vm.refresh(candidateId: auth.profile?.id) } }
             }
             .task { await vm.refresh(candidateId: auth.profile?.id) }
+        }
+    }
+}
+
+/// Native conversation: decrypted bubbles + reply, via the edge function.
+struct ConversationView: View {
+    let thread: MessageThread
+    let title: String
+
+    @State private var messages: [DecryptedMessage] = []
+    @State private var draft = ""
+    @State private var isLoading = true
+    @State private var sending = false
+    @State private var errorText: String?
+
+    private let data = DataService()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if isLoading {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if messages.isEmpty {
+                EmptyStateView(title: "No messages yet",
+                               message: "Say hello — your reply goes straight to the employer.")
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 10) {
+                            ForEach(messages) { msg in
+                                MessageBubble(message: msg).id(msg.id)
+                            }
+                        }
+                        .padding(16)
+                    }
+                    .onChange(of: messages.count) { _ in
+                        if let last = messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+                    }
+                    .onAppear {
+                        if let last = messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                    }
+                }
+            }
+
+            Divider()
+            HStack(spacing: 10) {
+                TextField("Message…", text: $draft, axis: .vertical)
+                    .lineLimit(1...4)
+                    .foregroundColor(Brand.navy)
+                    .padding(10)
+                    .background(Brand.surface)
+                    .cornerRadius(18)
+                Button {
+                    Task { await send() }
+                } label: {
+                    if sending {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 30))
+                            .foregroundColor(draft.trimmingCharacters(in: .whitespaces).isEmpty ? Brand.slate : Brand.teal)
+                    }
+                }
+                .disabled(sending || draft.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding(12)
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("Message problem", isPresented: .init(
+            get: { errorText != nil }, set: { if !$0 { errorText = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorText ?? "")
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            messages = try await data.fetchMessages(threadId: thread.id)
+        } catch {
+            errorText = "Couldn't load this conversation: \(error.localizedDescription)"
+        }
+    }
+
+    private func send() async {
+        let text = draft.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return }
+        sending = true
+        defer { sending = false }
+        do {
+            try await data.sendMessage(threadId: thread.id, text: text)
+            draft = ""
+            messages = try await data.fetchMessages(threadId: thread.id)
+        } catch {
+            errorText = "Couldn't send: \(error.localizedDescription)"
+        }
+    }
+}
+
+struct MessageBubble: View {
+    let message: DecryptedMessage
+
+    var body: some View {
+        HStack {
+            if message.isFromCandidate { Spacer(minLength: 40) }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(message.body ?? "(unreadable)")
+                    .font(.subheadline)
+                    .foregroundColor(message.isFromCandidate ? .white : Brand.navy)
+                Text(message.createdAt.formatted(date: .omitted, time: .shortened))
+                    .font(.caption2)
+                    .foregroundColor(message.isFromCandidate ? .white.opacity(0.7) : Brand.slate)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(message.isFromCandidate ? Brand.teal : Brand.surface)
+            .cornerRadius(16)
+            if !message.isFromCandidate { Spacer(minLength: 40) }
         }
     }
 }

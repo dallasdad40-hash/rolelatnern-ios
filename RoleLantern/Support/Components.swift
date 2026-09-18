@@ -50,7 +50,7 @@ struct CompanyAvatar: View {
         ZStack(alignment: .center) {
             Circle().fill(color.opacity(0.14))
             Text(initial)
-                .font(.system(size: size * 0.4, weight: .medium, design: .rounded))
+                .font(.system(size: size * 0.55, weight: .semibold, design: .rounded))
                 .foregroundColor(color)
                 .minimumScaleFactor(0.5)
                 .frame(width: size, height: size, alignment: .center)

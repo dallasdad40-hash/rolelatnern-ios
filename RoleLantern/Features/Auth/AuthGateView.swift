@@ -182,6 +182,8 @@ struct EmailCodeSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var code = ""
     @State private var busy = false
+    @State private var resendCooldown = 60
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         NavigationStack {
@@ -220,18 +222,28 @@ struct EmailCodeSheet: View {
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(code.count < 6 || busy)
 
-                Button("Resend code") {
-                    Task {
-                        let email = auth.pendingCodeEmail ?? ""
-                        await auth.sendMagicLink(email: email)
+                if resendCooldown > 0 {
+                    Text("Didn't get it? You can resend in \(resendCooldown)s")
+                        .font(.footnote)
+                        .foregroundColor(Brand.slate)
+                } else {
+                    Button("Resend code") {
+                        Task {
+                            let email = auth.pendingCodeEmail ?? ""
+                            await auth.sendMagicLink(email: email)
+                            resendCooldown = 60
+                        }
                     }
+                    .font(.footnote)
+                    .foregroundColor(Brand.teal)
                 }
-                .font(.footnote)
-                .foregroundColor(Brand.teal)
 
                 Spacer()
             }
             .padding(28)
+            .onReceive(timer) { _ in
+                if resendCooldown > 0 { resendCooldown -= 1 }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

@@ -38,8 +38,18 @@ final class BiometricLockManager: ObservableObject {
         if isEnabled { isLocked = true }
     }
 
+    private var isPrompting = false
+
     func unlock() async {
+        guard isLocked, !isPrompting else { return }
+        isPrompting = true
+        defer { isPrompting = false }
+
+        // Let the app finish becoming active before presenting Face ID —
+        // prompting mid-transition is what makes the first attempt fail.
+        try? await Task.sleep(nanoseconds: 400_000_000)
         guard isLocked else { return }
+
         let context = LAContext()
         context.localizedCancelTitle = "Cancel"
         do {
@@ -49,7 +59,7 @@ final class BiometricLockManager: ObservableObject {
             )
             if ok { isLocked = false }
         } catch {
-            // User cancelled or auth failed — stay locked.
+            // User cancelled or auth failed — stay locked; the button retries.
         }
     }
 

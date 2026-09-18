@@ -127,7 +127,7 @@ final class AuthViewModel: ObservableObject {
                 _ = try await client.auth.verifyOTP(email: email, token: code, type: .signup)
                 pendingCodeEmail = nil
             } catch {
-                errorMessage = "That code didn't work. Check the latest email and try again."
+                errorMessage = friendly(error)
             }
         }
     }
@@ -234,9 +234,13 @@ final class AuthViewModel: ObservableObject {
     }
 
     private func friendly(_ error: Error) -> String {
-        if let authError = error as? AuthError {
-            return authError.localizedDescription
+        let msg = error.localizedDescription
+        if msg.localizedCaseInsensitiveContains("security purposes") || msg.localizedCaseInsensitiveContains("rate limit") {
+            return "A code was just sent — check your inbox (and spam). You can request another in about a minute."
         }
-        return error.localizedDescription
+        if msg.localizedCaseInsensitiveContains("expired") || msg.localizedCaseInsensitiveContains("invalid") {
+            return "That code expired or didn't match. Tap resend for a fresh one — codes work for a limited time."
+        }
+        return msg
     }
 }

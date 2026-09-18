@@ -23,7 +23,12 @@ struct RoleLanternApp: App {
                 .task { await auth.start() }
                 .onOpenURL { url in auth.handleDeepLink(url) }
                 .onChange(of: scenePhase) { phase in
-                    if phase == .background { lock.lockIfEnabled() }
+                    if phase == .background {
+                        lock.lockIfEnabled()
+                    } else if phase == .active, lock.isLocked {
+                        // Prompt only once the app is fully active — reliable first try.
+                        Task { await lock.unlock() }
+                    }
                 }
         }
     }

@@ -5,12 +5,21 @@ import SwiftUI
 final class MessagesViewModel: ObservableObject {
     @Published var threads: [MessageThread] = []
     @Published var unreadByThread: [UUID: Int] = [:]
-    @Published var jobTitles: [UUID: String] = [:]
+    /// Per-thread display info (company + job), keyed by thread id.
+    @Published var companyByThread: [UUID: String] = [:]
+    @Published var jobByThread: [UUID: String] = [:]
     @Published var isLoading = false
 
     private let data = DataService()
 
     var totalUnread: Int { unreadByThread.values.reduce(0, +) }
+
+    func company(for thread: MessageThread) -> String {
+        companyByThread[thread.id] ?? "Employer"
+    }
+    func jobTitle(for thread: MessageThread) -> String? {
+        jobByThread[thread.id]
+    }
 
     func refresh(candidateId: UUID?) async {
         guard let candidateId else { return }
@@ -20,11 +29,10 @@ final class MessagesViewModel: ObservableObject {
             let fetched = try await data.fetchThreads(candidateId: candidateId)
             threads = fetched
             unreadByThread = try await data.fetchUnreadCounts(threadIds: fetched.map(\.id))
-            for thread in fetched {
-                if let jobId = thread.jobId, jobTitles[jobId] == nil {
-                    if let job = try? await data.fetchJob(id: jobId) {
-                        jobTitles[jobId] = "\(job.jobTitle) · \(job.companyName)"
-                    }
+            for thread in fetched where companyByThread[thread.id] == nil {
+                if let jobId = thread.jobId, let job = try? await data.fetchJob(id: jobId) {
+                    companyByThread[thread.id] = job.companyName
+                    jobByThread[thread.id] = job.jobTitle
                 }
             }
         } catch {
@@ -55,7 +63,8 @@ struct MessagesView: View {
                         NavigationLink(value: thread) {
                             ThreadRow(
                                 thread: thread,
-                                title: thread.jobId.flatMap { vm.jobTitles[$0] } ?? "Employer conversation",
+                                company: vm.company(for: thread),
+                                jobTitle: vm.jobTitle(for: thread),
                                 unread: vm.unreadByThread[thread.id] ?? 0
                             )
                         }
@@ -70,7 +79,8 @@ struct MessagesView: View {
             .navigationDestination(for: MessageThread.self) { thread in
                 ConversationView(
                     thread: thread,
-                    title: thread.jobId.flatMap { vm.jobTitles[$0] } ?? "Employer conversation"
+                    company: vm.company(for: thread),
+                    jobTitle: vm.jobTitle(for: thread)
                 )
                 .onDisappear { Task { await vm.refresh(candidateId: auth.profile?.id) } }
             }
@@ -82,7 +92,8 @@ struct MessagesView: View {
 /// Native conversation: decrypted bubbles + reply, via the edge function.
 struct ConversationView: View {
     let thread: MessageThread
-    let title: String
+    let company: String
+    let jobTitle: String?
 
     @State private var messages: [DecryptedMessage] = []
     @State private var draft = ""
@@ -94,6 +105,27 @@ struct ConversationView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Who this conversation is with, and about which role.
+            HStack(spacing: 10) {
+                CompanyAvatar(name: company, size: 36)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(company)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(Brand.navy)
+                    if let jobTitle {
+                        Text("Re: \(jobTitle)")
+                            .font(.caption)
+                            .foregroundColor(Brand.slate)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(Brand.surface.opacity(0.5))
+            Divider()
+
             if isLoading {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if messages.isEmpty {
@@ -141,7 +173,7 @@ struct ConversationView: View {
             }
             .padding(12)
         }
-        .navigationTitle(title)
+        .navigationTitle("Messages")
         .navigationBarTitleDisplayMode(.inline)
         .alert("Message problem", isPresented: .init(
             get: { errorText != nil }, set: { if !$0 { errorText = nil } }
@@ -203,23 +235,24 @@ struct MessageBubble: View {
 
 struct ThreadRow: View {
     let thread: MessageThread
-    let title: String
+    let company: String
+    let jobTitle: String?
     let unread: Int
 
     var body: some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(unread > 0 ? Brand.teal.opacity(0.15) : Brand.surface)
-                    .frame(width: 44, height: 44)
-                Image(systemName: "envelope.fill")
-                    .foregroundColor(unread > 0 ? Brand.teal : Brand.slate)
-            }
+            CompanyAvatar(name: company, size: 44)
             VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.subheadline.weight(unread > 0 ? .medium : .regular))
+                Text(company)
+                    .font(.subheadline.weight(unread > 0 ? .semibold : .medium))
                     .foregroundColor(Brand.navy)
                     .lineLimit(1)
+                if let jobTitle {
+                    Text("Re: \(jobTitle)")
+                        .font(.caption)
+                        .foregroundColor(Brand.teal)
+                        .lineLimit(1)
+                }
                 Text(thread.readablePreview ?? (unread > 0 ? "New message — tap to read" : "Tap to view conversation"))
                     .font(.caption)
                     .foregroundColor(Brand.slate)

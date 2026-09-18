@@ -103,6 +103,7 @@ final class AuthViewModel: ObservableObject {
     // MARK: Email + password
 
     func signIn(email: String, password: String) async {
+        UserDefaults.standard.set(email, forKey: "lastKnownEmail")
         do {
             _ = try await client.auth.signIn(email: email, password: password)
         } catch {
@@ -127,6 +128,8 @@ final class AuthViewModel: ObservableObject {
     private let codeReuseWindow: TimeInterval = 15 * 60
 
     func sendMagicLink(email: String, force: Bool = false) async {
+        // Remember the email from the very first attempt, not just successes.
+        UserDefaults.standard.set(email, forKey: "lastKnownEmail")
         // Open the entry box IMMEDIATELY — never make the user wait to type.
         pendingCodeEmail = email
         if !force, let last = lastCodeRequest, last.email == email,
@@ -189,6 +192,7 @@ final class AuthViewModel: ObservableObject {
     /// Sends a recovery code. Returns true when the user should proceed to code entry
     /// (also on rate limit — a valid code is already in their inbox).
     func sendPasswordReset(email: String, force: Bool = false) async -> Bool {
+        UserDefaults.standard.set(email, forKey: "lastKnownEmail")
         if !force, hasRecentReset(email: email) {
             return true
         }

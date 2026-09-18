@@ -137,6 +137,11 @@ struct AuthGateView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
                 .padding(.top, 4)
+
+                Text("Build 2.1")
+                    .font(.caption2)
+                    .foregroundColor(Brand.slate.opacity(0.5))
+                    .frame(maxWidth: .infinity)
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 24)
@@ -146,6 +151,10 @@ struct AuthGateView: View {
         .ignoresSafeArea(edges: .top)
         .background(Color.white.ignoresSafeArea())
         .onAppear {
+            // Returning users never retype their email.
+            if email.isEmpty, let remembered = auth.rememberedEmail {
+                email = remembered
+            }
             withAnimation(.easeOut(duration: 1.0).delay(1.2)) {
                 contentVisible = true
             }

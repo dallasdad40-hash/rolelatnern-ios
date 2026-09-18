@@ -117,10 +117,13 @@ final class AuthViewModel: ObservableObject {
         }
     }
 
-    func sendMagicLink(email: String) async {
-        // A code from the last minute is still valid — reopen entry, don't re-request.
-        if let last = lastCodeRequest, last.email == email,
-           Date().timeIntervalSince(last.at) < 55 {
+    /// Codes stay valid for a long time; requesting a new one CANCELS the old.
+    /// So: reuse a recently sent code unless the user explicitly asks to resend.
+    private let codeReuseWindow: TimeInterval = 15 * 60
+
+    func sendMagicLink(email: String, force: Bool = false) async {
+        if !force, let last = lastCodeRequest, last.email == email,
+           Date().timeIntervalSince(last.at) < codeReuseWindow {
             pendingCodeEmail = email
             return
         }
@@ -152,14 +155,28 @@ final class AuthViewModel: ObservableObject {
         errorMessage = "That code didn't match. Codes stop working when a newer email arrives — use the code from the most recent email, or wait for the resend timer."
     }
 
+    private var lastResetRequest: (email: String, at: Date)?
+
+    func hasRecentReset(email: String) -> Bool {
+        guard let last = lastResetRequest else { return false }
+        return last.email == email && Date().timeIntervalSince(last.at) < codeReuseWindow
+    }
+
     /// Sends a recovery code. Returns true when the user should proceed to code entry
     /// (also on rate limit — a valid code is already in their inbox).
-    func sendPasswordReset(email: String) async -> Bool {
+    func sendPasswordReset(email: String, force: Bool = false) async -> Bool {
+        if !force, hasRecentReset(email: email) {
+            return true
+        }
         do {
             try await client.auth.resetPasswordForEmail(email, redirectTo: AppConfig.authRedirectURL)
+            lastResetRequest = (email, Date())
             return true
         } catch {
-            if isRateLimit(error) { return true }
+            if isRateLimit(error) {
+                lastResetRequest = (email, Date())
+                return true
+            }
             errorMessage = friendly(error)
             return false
         }

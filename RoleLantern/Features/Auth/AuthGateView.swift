@@ -182,7 +182,7 @@ struct EmailCodeSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var code = ""
     @State private var busy = false
-    @State private var resendCooldown = 60
+    @State private var resendCooldown = 15
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -234,8 +234,9 @@ struct EmailCodeSheet: View {
                     Button("Resend code") {
                         Task {
                             let email = auth.pendingCodeEmail ?? ""
-                            await auth.sendMagicLink(email: email)
-                            resendCooldown = 60
+                            await auth.sendMagicLink(email: email, force: true)
+                            code = ""
+                            resendCooldown = 15
                         }
                     }
                     .font(.footnote)
@@ -245,6 +246,7 @@ struct EmailCodeSheet: View {
                 Spacer()
             }
             .padding(28)
+            .onAppear { code = "" }
             .onReceive(timer) { _ in
                 if resendCooldown > 0 { resendCooldown -= 1 }
             }
@@ -296,7 +298,8 @@ struct ForgotPasswordSheet: View {
                             busy = true
                             if await auth.sendPasswordReset(email: email) {
                                 step = 1
-                                resendCooldown = 60
+                                code = ""
+                                resendCooldown = 15
                             }
                             busy = false
                         }
@@ -342,8 +345,9 @@ struct ForgotPasswordSheet: View {
                     } else {
                         Button("Resend code") {
                             Task {
-                                _ = await auth.sendPasswordReset(email: email)
-                                resendCooldown = 60
+                                _ = await auth.sendPasswordReset(email: email, force: true)
+                                code = ""
+                                resendCooldown = 15
                             }
                         }
                         .font(.footnote)
@@ -358,6 +362,12 @@ struct ForgotPasswordSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                }
+            }
+            .onAppear {
+                // A recent reset code is still valid — go straight to entry.
+                if !email.isEmpty, auth.hasRecentReset(email: email) {
+                    step = 1
                 }
             }
             .onReceive(timer) { _ in

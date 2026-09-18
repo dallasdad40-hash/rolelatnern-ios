@@ -76,7 +76,7 @@ struct AuthGateView: View {
                 .disabled(busy || email.isEmpty || password.isEmpty)
 
                 HStack(spacing: 16) {
-                    Button("No password? Email me a sign-in link") {
+                    Button("No password? Email me a sign-in code") {
                         Task { await auth.sendMagicLink(email: email) }
                     }
                     .disabled(email.isEmpty)
@@ -134,6 +134,12 @@ struct AuthGateView: View {
             }
         }
         .sheet(isPresented: $showForgot) { ForgotPasswordSheet(email: email) }
+        .sheet(isPresented: .init(
+            get: { auth.pendingCodeEmail != nil },
+            set: { if !$0 { auth.pendingCodeEmail = nil } }
+        )) {
+            EmailCodeSheet()
+        }
         .alert("Something went wrong", isPresented: .init(
             get: { auth.errorMessage != nil },
             set: { if !$0 { auth.errorMessage = nil } }
@@ -149,6 +155,79 @@ struct AuthGateView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(auth.infoMessage ?? "")
+        }
+    }
+}
+
+/// Entry for the one-time code the backend emails (sign-in and account confirmation).
+struct EmailCodeSheet: View {
+    @EnvironmentObject var auth: AuthViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var code = ""
+    @State private var busy = false
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                Image(systemName: "envelope.badge")
+                    .font(.system(size: 40))
+                    .foregroundColor(Brand.teal)
+                Text("Enter your code")
+                    .font(.title3.weight(.medium))
+                    .foregroundColor(Brand.navy)
+                Text("We emailed a code to \(auth.pendingCodeEmail ?? "you"). It may take a minute to arrive.")
+                    .font(.subheadline)
+                    .foregroundColor(Brand.slate)
+                    .multilineTextAlignment(.center)
+
+                TextField("Enter code", text: $code)
+                    .keyboardType(.numberPad)
+                    .textContentType(.oneTimeCode)
+                    .font(.system(size: 28, weight: .medium, design: .monospaced))
+                    .foregroundColor(Brand.navy)
+                    .multilineTextAlignment(.center)
+                    .padding(14)
+                    .background(Brand.surface)
+                    .cornerRadius(12)
+                    .frame(maxWidth: 260)
+
+                Button {
+                    Task {
+                        busy = true
+                        await auth.verifyEmailCode(code)
+                        busy = false
+                    }
+                } label: {
+                    if busy { ProgressView().tint(.white) } else { Text("Verify") }
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(code.count < 6 || busy)
+
+                Button("Resend code") {
+                    Task {
+                        let email = auth.pendingCodeEmail ?? ""
+                        await auth.sendMagicLink(email: email)
+                    }
+                }
+                .font(.footnote)
+                .foregroundColor(Brand.teal)
+
+                Spacer()
+            }
+            .padding(28)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .alert("Something went wrong", isPresented: .init(
+            get: { auth.errorMessage != nil },
+            set: { if !$0 { auth.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(auth.errorMessage ?? "")
         }
     }
 }

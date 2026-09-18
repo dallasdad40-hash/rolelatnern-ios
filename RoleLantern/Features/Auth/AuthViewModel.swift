@@ -16,6 +16,8 @@ final class AuthViewModel: ObservableObject {
     @Published var phase: Phase = .loading
     @Published var errorMessage: String?
     @Published var infoMessage: String?
+    /// Set when the backend has emailed a one-time code and we're waiting for it.
+    @Published var pendingCodeEmail: String?
     @Published var role: String = "candidate"
     @Published var profile: CandidateProfile?
 
@@ -97,7 +99,8 @@ final class AuthViewModel: ObservableObject {
         do {
             let result = try await client.auth.signUp(email: email, password: password, redirectTo: AppConfig.authRedirectURL)
             if result.session == nil {
-                infoMessage = "Check your inbox to confirm your email, then sign in."
+                // Email confirmation flow: the backend emails a code.
+                pendingCodeEmail = email
             }
         } catch {
             errorMessage = friendly(error)
@@ -107,9 +110,25 @@ final class AuthViewModel: ObservableObject {
     func sendMagicLink(email: String) async {
         do {
             try await client.auth.signInWithOTP(email: email, redirectTo: AppConfig.authRedirectURL)
-            infoMessage = "Magic link sent — open it on this device to sign in."
+            pendingCodeEmail = email
         } catch {
             errorMessage = friendly(error)
+        }
+    }
+
+    /// Verifies the emailed one-time code (sign-in first, then sign-up confirmation).
+    func verifyEmailCode(_ code: String) async {
+        guard let email = pendingCodeEmail else { return }
+        do {
+            _ = try await client.auth.verifyOTP(email: email, token: code, type: .email)
+            pendingCodeEmail = nil
+        } catch {
+            do {
+                _ = try await client.auth.verifyOTP(email: email, token: code, type: .signup)
+                pendingCodeEmail = nil
+            } catch {
+                errorMessage = "That code didn't work. Check the latest email and try again."
+            }
         }
     }
 

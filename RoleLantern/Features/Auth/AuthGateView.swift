@@ -150,7 +150,9 @@ struct AuthGateView: View {
                 contentVisible = true
             }
         }
-        .sheet(isPresented: $showForgot) { ForgotPasswordSheet(email: email) }
+        .sheet(isPresented: $showForgot) {
+            ForgotPasswordSheet(email: email.isEmpty ? (auth.rememberedEmail ?? "") : email)
+        }
         .sheet(isPresented: .init(
             get: { auth.pendingCodeEmail != nil },
             set: { if !$0 { auth.pendingCodeEmail = nil } }
@@ -290,7 +292,7 @@ struct ForgotPasswordSheet: View {
             ScrollView {
                 VStack(spacing: 14) {
                     if codeSent {
-                        Label("Code emailed to \(email) — enter it below with your new password.", systemImage: "envelope.badge")
+                        Label("For your security we just emailed a code to \(email) — it proves it's really you. Enter it with your new password.", systemImage: "envelope.badge")
                             .font(.footnote)
                             .foregroundColor(Brand.teal)
                             .multilineTextAlignment(.leading)

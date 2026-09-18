@@ -37,6 +37,8 @@ final class AuthViewModel: ObservableObject {
 
     var userId: UUID? { client.auth.currentUser?.id }
     var userEmail: String? { client.auth.currentUser?.email }
+    /// Email from the last successful sign-in on this device.
+    var rememberedEmail: String? { UserDefaults.standard.string(forKey: "lastKnownEmail") }
 
     // MARK: Session lifecycle
 
@@ -66,6 +68,9 @@ final class AuthViewModel: ObservableObject {
             return
         }
         role = client.auth.currentUser?.appMetadata["role"]?.stringValue ?? "candidate"
+        if let email = client.auth.currentUser?.email {
+            UserDefaults.standard.set(email, forKey: "lastKnownEmail")
+        }
         if role == "candidate" {
             await loadOrCreateProfile()
         }

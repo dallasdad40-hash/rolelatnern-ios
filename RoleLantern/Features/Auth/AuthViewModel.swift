@@ -122,22 +122,41 @@ final class AuthViewModel: ObservableObject {
     private let codeReuseWindow: TimeInterval = 15 * 60
 
     func sendMagicLink(email: String, force: Bool = false) async {
+        // Open the entry box IMMEDIATELY — never make the user wait to type.
+        pendingCodeEmail = email
         if !force, let last = lastCodeRequest, last.email == email,
            Date().timeIntervalSince(last.at) < codeReuseWindow {
-            pendingCodeEmail = email
-            return
+            return  // a valid code is already in their inbox
         }
         do {
             try await client.auth.signInWithOTP(email: email, redirectTo: AppConfig.authRedirectURL)
             lastCodeRequest = (email, Date())
-            pendingCodeEmail = email
         } catch {
-            if isRateLimit(error) {
-                // A code was already emailed — let them type it.
-                pendingCodeEmail = email
-            } else {
+            if !isRateLimit(error) {
                 errorMessage = friendly(error)
             }
+            // Rate limited = a code was already emailed; entry stays open.
+        }
+    }
+
+    /// One-shot in-app reset: verifies the emailed code and sets the new
+    /// password in a single action.
+    func resetPassword(email: String, code: String, newPassword: String) async -> Bool {
+        do {
+            _ = try await client.auth.verifyOTP(email: email, token: code, type: .recovery)
+        } catch {
+            errorMessage = friendly(error)
+            return false
+        }
+        do {
+            _ = try await client.auth.update(user: UserAttributes(password: newPassword))
+            infoMessage = "Password updated — you're signed in."
+            return true
+        } catch {
+            // Verified and signed in, but the password change failed.
+            resetStage = .newPassword
+            errorMessage = friendly(error)
+            return true
         }
     }
 

@@ -267,79 +267,96 @@ struct EmailCodeSheet: View {
     }
 }
 
-/// In-app password reset: email → emailed code → (after verify) new password.
+/// One-screen in-app password reset: the code is emailed automatically the
+/// moment this opens; the user types code + new password together. No steps.
 struct ForgotPasswordSheet: View {
     @EnvironmentObject var auth: AuthViewModel
     @Environment(\.dismiss) private var dismiss
     @State var email: String
-    @State private var step = 0          // 0 = email, 1 = code
     @State private var code = ""
+    @State private var newPassword = ""
+    @State private var confirmPassword = ""
     @State private var busy = false
-    @State private var resendCooldown = 0
+    @State private var codeSent = false
+    @State private var resendCooldown = 15
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    private var canSubmit: Bool {
+        code.count >= 6 && newPassword.count >= 8 && newPassword == confirmPassword
+    }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                if step == 0 {
-                    Text("We'll email you a code — enter it on the next screen and choose a new password. No leaving the app.")
-                        .font(.subheadline)
-                        .foregroundColor(Brand.slate)
-                    TextField("Email", text: $email)
-                        .textContentType(.emailAddress)
-                        .keyboardType(.emailAddress)
-                        .textInputAutocapitalization(.never)
+            ScrollView {
+                VStack(spacing: 14) {
+                    if codeSent {
+                        Label("Code emailed to \(email) — enter it below with your new password.", systemImage: "envelope.badge")
+                            .font(.footnote)
+                            .foregroundColor(Brand.teal)
+                            .multilineTextAlignment(.leading)
+                    } else {
+                        TextField("Email", text: $email)
+                            .textContentType(.emailAddress)
+                            .keyboardType(.emailAddress)
+                            .textInputAutocapitalization(.never)
+                            .foregroundColor(Brand.navy)
+                            .padding(14)
+                            .background(Brand.surface)
+                            .cornerRadius(12)
+                    }
+
+                    TextField("Code from the newest email", text: $code)
+                        .keyboardType(.numberPad)
+                        .textContentType(.oneTimeCode)
+                        .font(.system(size: 24, weight: .medium, design: .monospaced))
+                        .foregroundColor(Brand.navy)
+                        .multilineTextAlignment(.center)
+                        .padding(14)
+                        .background(Brand.surface)
+                        .cornerRadius(12)
+
+                    SecureField("New password (8+ characters)", text: $newPassword)
+                        .textContentType(.newPassword)
                         .foregroundColor(Brand.navy)
                         .padding(14)
                         .background(Brand.surface)
                         .cornerRadius(12)
+
+                    SecureField("Confirm new password", text: $confirmPassword)
+                        .textContentType(.newPassword)
+                        .foregroundColor(Brand.navy)
+                        .padding(14)
+                        .background(Brand.surface)
+                        .cornerRadius(12)
+
                     Button {
                         Task {
                             busy = true
-                            if await auth.sendPasswordReset(email: email) {
-                                step = 1
-                                code = ""
-                                resendCooldown = 15
+                            if await auth.resetPassword(email: email, code: code, newPassword: newPassword) {
+                                dismiss()
                             }
                             busy = false
                         }
                     } label: {
-                        if busy { ProgressView().tint(.white) } else { Text("Email me a code") }
+                        if busy { ProgressView().tint(.white) } else { Text("Reset password") }
                     }
                     .buttonStyle(PrimaryButtonStyle())
-                    .disabled(email.isEmpty || busy)
-                } else {
-                    Text("Enter the code we emailed to \(email).")
-                        .font(.subheadline)
-                        .foregroundColor(Brand.slate)
-                        .multilineTextAlignment(.center)
-                    Text("Use the code from the newest email — older codes stop working.")
-                        .font(.caption)
-                        .foregroundColor(Brand.gold)
-                        .multilineTextAlignment(.center)
-                    TextField("Enter code", text: $code)
-                        .keyboardType(.numberPad)
-                        .textContentType(.oneTimeCode)
-                        .font(.system(size: 28, weight: .medium, design: .monospaced))
-                        .foregroundColor(Brand.navy)
-                        .multilineTextAlignment(.center)
-                        .padding(14)
-                        .background(Brand.surface)
-                        .cornerRadius(12)
-                        .frame(maxWidth: 260)
-                    Button {
-                        Task {
-                            busy = true
-                            await auth.verifyResetCode(email: email, code: code)
-                            busy = false
+                    .disabled(!canSubmit || busy)
+
+                    if !codeSent {
+                        Button("Email me the code") {
+                            Task {
+                                if !email.isEmpty, await auth.sendPasswordReset(email: email) {
+                                    codeSent = true
+                                    resendCooldown = 15
+                                }
+                            }
                         }
-                    } label: {
-                        if busy { ProgressView().tint(.white) } else { Text("Verify code") }
-                    }
-                    .buttonStyle(PrimaryButtonStyle())
-                    .disabled(code.count < 6 || busy)
-                    if resendCooldown > 0 {
-                        Text("Didn't get it? You can resend in \(resendCooldown)s")
+                        .font(.footnote)
+                        .foregroundColor(Brand.teal)
+                        .disabled(email.isEmpty)
+                    } else if resendCooldown > 0 {
+                        Text("No email? Check spam — or resend in \(resendCooldown)s")
                             .font(.footnote)
                             .foregroundColor(Brand.slate)
                     } else {
@@ -354,9 +371,8 @@ struct ForgotPasswordSheet: View {
                         .foregroundColor(Brand.teal)
                     }
                 }
-                Spacer()
+                .padding(24)
             }
-            .padding(24)
             .navigationTitle("Reset password")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -365,9 +381,10 @@ struct ForgotPasswordSheet: View {
                 }
             }
             .onAppear {
-                // A recent reset code is still valid — go straight to entry.
-                if !email.isEmpty, auth.hasRecentReset(email: email) {
-                    step = 1
+                // Fire the email immediately — nothing to wait for before typing.
+                if !email.isEmpty {
+                    codeSent = true
+                    Task { _ = await auth.sendPasswordReset(email: email) }
                 }
             }
             .onReceive(timer) { _ in

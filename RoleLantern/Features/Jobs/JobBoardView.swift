@@ -42,7 +42,11 @@ struct JobBoardView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Wordmark(font: .title2.weight(.semibold))
+                    Image("LanternLogo")
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 34, height: 34)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

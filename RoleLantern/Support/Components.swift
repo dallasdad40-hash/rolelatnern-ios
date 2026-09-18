@@ -47,13 +47,11 @@ struct CompanyAvatar: View {
     }
 
     var body: some View {
-        ZStack(alignment: .center) {
-            Circle().fill(color.opacity(0.14))
+        ZStack {
+            Circle().fill(color)
             Text(initial)
-                .font(.system(size: size * 0.55, weight: .semibold, design: .rounded))
-                .foregroundColor(color)
-                .minimumScaleFactor(0.5)
-                .frame(width: size, height: size, alignment: .center)
+                .font(.system(size: size * 0.62, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)

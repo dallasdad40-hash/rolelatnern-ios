@@ -38,7 +38,6 @@ final class MessagesViewModel: ObservableObject {
 struct MessagesView: View {
     @EnvironmentObject var auth: AuthViewModel
     @ObservedObject var vm: MessagesViewModel
-    @State private var openThread: MessageThread?
 
     var body: some View {
         NavigationStack {
@@ -53,9 +52,7 @@ struct MessagesView: View {
                     )
                 } else {
                     List(vm.threads) { thread in
-                        Button {
-                            openThread = thread
-                        } label: {
+                        NavigationLink(value: thread) {
                             ThreadRow(
                                 thread: thread,
                                 title: thread.jobId.flatMap { vm.jobTitles[$0] } ?? "Employer conversation",
@@ -70,13 +67,7 @@ struct MessagesView: View {
                 }
             }
             .navigationTitle("Messages")
-            .sheet(item: $openThread, onDismiss: {
-                Task { await vm.refresh(candidateId: auth.profile?.id) }
-            }) { _ in
-                SafariView(url: AppConfig.webBaseURL.appendingPathComponent("candidate/messages"))
-                    .ignoresSafeArea()
-            }
-            .navigationDestination(item: $openThread) { thread in
+            .navigationDestination(for: MessageThread.self) { thread in
                 ConversationView(
                     thread: thread,
                     title: thread.jobId.flatMap { vm.jobTitles[$0] } ?? "Employer conversation"

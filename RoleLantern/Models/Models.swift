@@ -271,20 +271,32 @@ struct MessageThread: Codable, Identifiable, Hashable {
 }
 
 /// A fully decrypted message returned by the candidate-messages edge function.
+/// `createdAt` is kept as the raw ISO string (Postgres timestamps carry
+/// microseconds, which Swift's default Date decoder rejects) and parsed lazily.
 struct DecryptedMessage: Codable, Identifiable {
     let id: UUID
     let senderRole: String
     let body: String?
-    let createdAt: Date
+    let createdAtRaw: String?
 
     enum CodingKeys: String, CodingKey {
         case id
         case senderRole = "sender_role"
         case body
-        case createdAt = "created_at"
+        case createdAtRaw = "created_at"
     }
 
     var isFromCandidate: Bool { senderRole == "candidate" }
+
+    var createdAt: Date {
+        guard let raw = createdAtRaw else { return Date() }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = iso.date(from: raw) { return d }
+        iso.formatOptions = [.withInternetDateTime]
+        if let d = iso.date(from: raw) { return d }
+        return Date()
+    }
 }
 
 struct MessageMeta: Codable, Identifiable {

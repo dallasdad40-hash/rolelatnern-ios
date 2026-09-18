@@ -15,6 +15,7 @@ struct AuthGateView: View {
     @State private var password = ""
     @State private var busy = false
     @State private var showForgot = false
+    @State private var sendingCode = false
 
     @State private var contentVisible = false
 
@@ -76,10 +77,26 @@ struct AuthGateView: View {
                 .disabled(busy || email.isEmpty || password.isEmpty)
 
                 HStack(spacing: 16) {
-                    Button("No password? Email me a sign-in code") {
-                        Task { await auth.sendMagicLink(email: email) }
+                    Button {
+                        if email.trimmingCharacters(in: .whitespaces).isEmpty {
+                            auth.errorMessage = "Type your email address in the field above first, then tap this again."
+                        } else {
+                            Task {
+                                sendingCode = true
+                                await auth.sendMagicLink(email: email)
+                                sendingCode = false
+                            }
+                        }
+                    } label: {
+                        if sendingCode {
+                            HStack(spacing: 6) {
+                                ProgressView().scaleEffect(0.7)
+                                Text("Sending code…")
+                            }
+                        } else {
+                            Text("No password? Email me a sign-in code")
+                        }
                     }
-                    .disabled(email.isEmpty)
                     Spacer()
                     if mode == .signIn {
                         Button("Forgot password?") { showForgot = true }

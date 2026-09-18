@@ -18,6 +18,16 @@ final class AuthViewModel: ObservableObject {
     @Published var infoMessage: String?
     /// Set when the backend has emailed a one-time code and we're waiting for it.
     @Published var pendingCodeEmail: String?
+
+    enum ResetStage: Equatable {
+        case newPassword
+    }
+    /// In-app password reset: set after the recovery code is verified.
+    @Published var resetStage: ResetStage?
+
+    /// Remembers the last code request so returning users re-open the entry
+    /// sheet instead of hitting the rate limit with a dead end.
+    private var lastCodeRequest: (email: String, at: Date)?
     @Published var role: String = "candidate"
     @Published var profile: CandidateProfile?
 
@@ -108,37 +118,68 @@ final class AuthViewModel: ObservableObject {
     }
 
     func sendMagicLink(email: String) async {
+        // A code from the last minute is still valid — reopen entry, don't re-request.
+        if let last = lastCodeRequest, last.email == email,
+           Date().timeIntervalSince(last.at) < 55 {
+            pendingCodeEmail = email
+            return
+        }
         do {
             try await client.auth.signInWithOTP(email: email, redirectTo: AppConfig.authRedirectURL)
+            lastCodeRequest = (email, Date())
             pendingCodeEmail = email
         } catch {
-            errorMessage = friendly(error)
-        }
-    }
-
-    /// Verifies the emailed one-time code (sign-in first, then sign-up confirmation).
-    func verifyEmailCode(_ code: String) async {
-        guard let email = pendingCodeEmail else { return }
-        do {
-            _ = try await client.auth.verifyOTP(email: email, token: code, type: .email)
-            pendingCodeEmail = nil
-        } catch {
-            do {
-                _ = try await client.auth.verifyOTP(email: email, token: code, type: .signup)
-                pendingCodeEmail = nil
-            } catch {
+            if isRateLimit(error) {
+                // A code was already emailed — let them type it.
+                pendingCodeEmail = email
+            } else {
                 errorMessage = friendly(error)
             }
         }
     }
 
-    func sendPasswordReset(email: String) async {
+    /// Verifies the emailed one-time code. Tries every code kind the backend
+    /// sends (sign-in, signup confirmation, password reset) so whichever email
+    /// the user reads from, the newest code gets them in.
+    func verifyEmailCode(_ code: String) async {
+        guard let email = pendingCodeEmail else { return }
+        for type in [EmailOTPType.email, .signup, .recovery] {
+            if (try? await client.auth.verifyOTP(email: email, token: code, type: type)) != nil {
+                pendingCodeEmail = nil
+                return
+            }
+        }
+        errorMessage = "That code didn't match. Codes stop working when a newer email arrives — use the code from the most recent email, or wait for the resend timer."
+    }
+
+    /// Sends a recovery code. Returns true when the user should proceed to code entry
+    /// (also on rate limit — a valid code is already in their inbox).
+    func sendPasswordReset(email: String) async -> Bool {
         do {
             try await client.auth.resetPasswordForEmail(email, redirectTo: AppConfig.authRedirectURL)
-            infoMessage = "Password reset email sent."
+            return true
+        } catch {
+            if isRateLimit(error) { return true }
+            errorMessage = friendly(error)
+            return false
+        }
+    }
+
+    /// Verifies the recovery code; on success the user is signed in and moves
+    /// to the new-password step.
+    func verifyResetCode(email: String, code: String) async {
+        do {
+            _ = try await client.auth.verifyOTP(email: email, token: code, type: .recovery)
+            resetStage = .newPassword
         } catch {
             errorMessage = friendly(error)
         }
+    }
+
+    private func isRateLimit(_ error: Error) -> Bool {
+        let msg = error.localizedDescription
+        return msg.localizedCaseInsensitiveContains("security purposes")
+            || msg.localizedCaseInsensitiveContains("rate limit")
     }
 
     // MARK: Google OAuth (ASWebAuthenticationSession under the hood)

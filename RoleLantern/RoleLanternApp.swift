@@ -38,6 +38,17 @@ struct RootView: View {
     @EnvironmentObject var auth: AuthViewModel
 
     var body: some View {
+        content
+            .sheet(isPresented: .init(
+                get: { auth.resetStage == .newPassword },
+                set: { if !$0 { auth.resetStage = nil } }
+            )) {
+                SetNewPasswordSheet()
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         switch auth.phase {
         case .loading:
             VStack(spacing: 16) {

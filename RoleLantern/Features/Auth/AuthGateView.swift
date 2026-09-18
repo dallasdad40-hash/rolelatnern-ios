@@ -198,6 +198,10 @@ struct EmailCodeSheet: View {
                     .font(.subheadline)
                     .foregroundColor(Brand.slate)
                     .multilineTextAlignment(.center)
+                Text("Use the code from the newest email — older codes stop working.")
+                    .font(.caption)
+                    .foregroundColor(Brand.gold)
+                    .multilineTextAlignment(.center)
 
                 TextField("Enter code", text: $code)
                     .keyboardType(.numberPad)
@@ -261,33 +265,91 @@ struct EmailCodeSheet: View {
     }
 }
 
+/// In-app password reset: email → emailed code → (after verify) new password.
 struct ForgotPasswordSheet: View {
     @EnvironmentObject var auth: AuthViewModel
     @Environment(\.dismiss) private var dismiss
     @State var email: String
+    @State private var step = 0          // 0 = email, 1 = code
+    @State private var code = ""
+    @State private var busy = false
+    @State private var resendCooldown = 0
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
-                Text("We'll email you a link to reset your password.")
-                    .font(.subheadline)
-                    .foregroundColor(Brand.slate)
-                TextField("Email", text: $email)
-                    .textContentType(.emailAddress)
-                    .keyboardType(.emailAddress)
-                    .textInputAutocapitalization(.never)
-                    .foregroundColor(Brand.navy)
-                    .padding(14)
-                    .background(Brand.surface)
-                    .cornerRadius(12)
-                Button("Send reset link") {
-                    Task {
-                        await auth.sendPasswordReset(email: email)
-                        dismiss()
+                if step == 0 {
+                    Text("We'll email you a code — enter it on the next screen and choose a new password. No leaving the app.")
+                        .font(.subheadline)
+                        .foregroundColor(Brand.slate)
+                    TextField("Email", text: $email)
+                        .textContentType(.emailAddress)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .foregroundColor(Brand.navy)
+                        .padding(14)
+                        .background(Brand.surface)
+                        .cornerRadius(12)
+                    Button {
+                        Task {
+                            busy = true
+                            if await auth.sendPasswordReset(email: email) {
+                                step = 1
+                                resendCooldown = 60
+                            }
+                            busy = false
+                        }
+                    } label: {
+                        if busy { ProgressView().tint(.white) } else { Text("Email me a code") }
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(email.isEmpty || busy)
+                } else {
+                    Text("Enter the code we emailed to \(email).")
+                        .font(.subheadline)
+                        .foregroundColor(Brand.slate)
+                        .multilineTextAlignment(.center)
+                    Text("Use the code from the newest email — older codes stop working.")
+                        .font(.caption)
+                        .foregroundColor(Brand.gold)
+                        .multilineTextAlignment(.center)
+                    TextField("Enter code", text: $code)
+                        .keyboardType(.numberPad)
+                        .textContentType(.oneTimeCode)
+                        .font(.system(size: 28, weight: .medium, design: .monospaced))
+                        .foregroundColor(Brand.navy)
+                        .multilineTextAlignment(.center)
+                        .padding(14)
+                        .background(Brand.surface)
+                        .cornerRadius(12)
+                        .frame(maxWidth: 260)
+                    Button {
+                        Task {
+                            busy = true
+                            await auth.verifyResetCode(email: email, code: code)
+                            busy = false
+                        }
+                    } label: {
+                        if busy { ProgressView().tint(.white) } else { Text("Verify code") }
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(code.count < 6 || busy)
+                    if resendCooldown > 0 {
+                        Text("Didn't get it? You can resend in \(resendCooldown)s")
+                            .font(.footnote)
+                            .foregroundColor(Brand.slate)
+                    } else {
+                        Button("Resend code") {
+                            Task {
+                                _ = await auth.sendPasswordReset(email: email)
+                                resendCooldown = 60
+                            }
+                        }
+                        .font(.footnote)
+                        .foregroundColor(Brand.teal)
                     }
                 }
-                .buttonStyle(PrimaryButtonStyle())
-                .disabled(email.isEmpty)
                 Spacer()
             }
             .padding(24)
@@ -298,6 +360,73 @@ struct ForgotPasswordSheet: View {
                     Button("Cancel") { dismiss() }
                 }
             }
+            .onReceive(timer) { _ in
+                if resendCooldown > 0 { resendCooldown -= 1 }
+            }
+        }
+    }
+}
+
+/// Shown right after a verified password-reset code: the user is signed in
+/// and sets their new password without ever leaving the app.
+struct SetNewPasswordSheet: View {
+    @EnvironmentObject var auth: AuthViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var newPassword = ""
+    @State private var confirmPassword = ""
+    @State private var busy = false
+
+    private var valid: Bool {
+        newPassword.count >= 8 && newPassword == confirmPassword
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                Image(systemName: "checkmark.shield")
+                    .font(.system(size: 40))
+                    .foregroundColor(Brand.teal)
+                Text("Code verified — you're in. Now choose a new password.")
+                    .font(.subheadline)
+                    .foregroundColor(Brand.slate)
+                    .multilineTextAlignment(.center)
+                SecureField("New password (8+ characters)", text: $newPassword)
+                    .textContentType(.newPassword)
+                    .foregroundColor(Brand.navy)
+                    .padding(14)
+                    .background(Brand.surface)
+                    .cornerRadius(12)
+                SecureField("Confirm new password", text: $confirmPassword)
+                    .textContentType(.newPassword)
+                    .foregroundColor(Brand.navy)
+                    .padding(14)
+                    .background(Brand.surface)
+                    .cornerRadius(12)
+                Button {
+                    Task {
+                        busy = true
+                        await auth.updatePassword(newPassword)
+                        busy = false
+                        auth.resetStage = nil
+                        dismiss()
+                    }
+                } label: {
+                    if busy { ProgressView().tint(.white) } else { Text("Save new password") }
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(!valid || busy)
+                Button("Skip for now") {
+                    auth.resetStage = nil
+                    dismiss()
+                }
+                .font(.footnote)
+                .foregroundColor(Brand.slate)
+                Spacer()
+            }
+            .padding(24)
+            .navigationTitle("New password")
+            .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled()
         }
     }
 }

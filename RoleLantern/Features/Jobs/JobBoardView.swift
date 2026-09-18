@@ -40,6 +40,12 @@ struct JobBoardView: View {
                 if newValue.isEmpty { Task { await vm.load() } }
             }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    HStack(spacing: 5) {
+                        LanternMark(size: 26)
+                        Wordmark(font: .subheadline.weight(.medium))
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showFilters = true
@@ -146,7 +152,17 @@ struct JobFiltersSheet: View {
                     }
                 }
                 Section("Location") {
-                    TextField("City, state, or country", text: $vm.location)
+                    Picker("Country", selection: $vm.country) {
+                        Text("Anywhere").tag(String?.none)
+                        ForEach(vm.availableCountries, id: \.self) { Text($0).tag(String?.some($0)) }
+                    }
+                    .onChange(of: vm.country) { _ in vm.state = nil }
+                    if vm.country != nil, !vm.availableStates.isEmpty {
+                        Picker("State / region", selection: $vm.state) {
+                            Text("All").tag(String?.none)
+                            ForEach(vm.availableStates, id: \.self) { Text($0).tag(String?.some($0)) }
+                        }
+                    }
                     Toggle("Remote only", isOn: $vm.remoteOnly)
                     Toggle("Near me", isOn: $vm.nearMe)
                         .onChange(of: vm.nearMe) { isOn in

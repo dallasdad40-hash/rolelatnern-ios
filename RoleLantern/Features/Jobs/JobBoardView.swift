@@ -30,7 +30,8 @@ struct JobBoardView: View {
                     .refreshable { await vm.load() }
                 }
             }
-            .navigationTitle("Jobs")
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: BoardJob.self) { job in
                 JobDetailView(job: job, jobsVM: vm)
             }
@@ -41,10 +42,7 @@ struct JobBoardView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 5) {
-                        LanternMark(size: 26)
-                        Wordmark(font: .subheadline.weight(.medium))
-                    }
+                    Wordmark(font: .title2.weight(.semibold))
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

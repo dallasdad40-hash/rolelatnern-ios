@@ -1,5 +1,30 @@
 import SwiftUI
 import SafariServices
+import QuickLook
+
+/// Native document preview (PDF, DOCX, images) for a downloaded local file.
+struct QuickLookPreview: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> QLPreviewController {
+        let controller = QLPreviewController()
+        controller.dataSource = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ controller: QLPreviewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(url: url) }
+
+    final class Coordinator: NSObject, QLPreviewControllerDataSource {
+        let url: URL
+        init(url: URL) { self.url = url }
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+            url as NSURL
+        }
+    }
+}
 
 /// Company monogram avatar, matching the website's job cards: a colored
 /// circle with the company initial. Color is stable per company name.
@@ -22,11 +47,13 @@ struct CompanyAvatar: View {
     }
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .center) {
             Circle().fill(color.opacity(0.14))
             Text(initial)
-                .font(.system(size: size * 0.44, weight: .semibold))
+                .font(.system(size: size * 0.4, weight: .medium, design: .rounded))
                 .foregroundColor(color)
+                .minimumScaleFactor(0.5)
+                .frame(width: size, height: size, alignment: .center)
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)

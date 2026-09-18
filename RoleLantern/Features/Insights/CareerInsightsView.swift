@@ -23,7 +23,7 @@ struct CVCard: View {
                 Task { await handleImport(result) }
             }
             .sheet(item: $cvPreviewURL) { url in
-                SafariView(url: url).ignoresSafeArea()
+                QuickLookPreview(url: url).ignoresSafeArea()
             }
             .alert("Update", isPresented: .init(
                 get: { statusMessage != nil },
@@ -168,7 +168,14 @@ struct CVCard: View {
     private func preview() async {
         guard let cv else { return }
         do {
-            cvPreviewURL = try await data.signedCVURL(path: cv.fileUrl)
+            let signed = try await data.signedCVURL(path: cv.fileUrl)
+            let (fileData, _) = try await URLSession.shared.data(from: signed)
+            var ext = ((cv.fileName ?? "") as NSString).pathExtension.lowercased()
+            if ext.isEmpty { ext = (cv.fileUrl as NSString).pathExtension.lowercased() }
+            let local = FileManager.default.temporaryDirectory
+                .appendingPathComponent("cv-preview.\(ext.isEmpty ? "pdf" : ext)")
+            try fileData.write(to: local, options: .atomic)
+            cvPreviewURL = local
         } catch {
             statusMessage = "Couldn't open your CV: \(error.localizedDescription)"
         }

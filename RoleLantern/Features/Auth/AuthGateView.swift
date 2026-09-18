@@ -138,7 +138,7 @@ struct AuthGateView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.top, 4)
 
-                Text("Build 2.1")
+                Text("Build 2.3")
                     .font(.caption2)
                     .foregroundColor(Brand.slate.opacity(0.5))
                     .frame(maxWidth: .infinity)

@@ -21,11 +21,14 @@ struct DataService {
 
     /// Slim column set for list screens — the board now has 14k+ active jobs,
     /// so heavy columns (full_description, structured_facts) load on detail only.
-    private static let listColumns = "id,job_title,company_name,location_text,remote_status,employment_type,salary_min,salary_max,currency,posted_date,summary,apply_url,job_type,status,therapeutic_area_tags,function_tags,job_level,required_education,years_experience_min,must_have_skills,nice_to_have_skills,job_freshness_status,freshness_rank,last_checked_at,boosted_until,expires_at"
+    private static let listColumns = "id,job_title,company_name,location_text,remote_status,is_remote_effective,employment_type,salary_min,salary_max,currency,posted_date,summary,apply_url,job_type,status,therapeutic_area_tags,function_tags,job_level,required_education,years_experience_min,must_have_skills,nice_to_have_skills,job_freshness_status,freshness_rank,loc_lat,loc_lng,last_checked_at,boosted_until,expires_at"
 
     func fetchJobs(search: String = "", functionTag: String? = nil,
                    therapeuticArea: String? = nil, remoteOnly: Bool = false,
-                   location: String = "") async throws -> [BoardJob] {
+                   location: String = "",
+                   country: String? = nil, state: String? = nil,
+                   nearLat: Double? = nil, nearLng: Double? = nil,
+                   radiusMiles: Double = 50) async throws -> [BoardJob] {
         var query = client.from("board_jobs")
             .select(Self.listColumns)
             .eq("status", value: "active")
@@ -42,10 +45,26 @@ struct DataService {
             query = query.contains("therapeutic_area_tags", value: [therapeuticArea])
         }
         if remoteOnly {
-            query = query.eq("remote_status", value: "remote")
+            // The ingestion pipeline's canonical remote flag.
+            query = query.eq("is_remote_effective", value: true)
         }
         if !location.isEmpty {
             query = query.ilike("location_text", pattern: "%\(location)%")
+        }
+        if let country {
+            query = query.eq("loc_country", value: country)
+        }
+        if let state {
+            query = query.eq("loc_state", value: state)
+        }
+        if let nearLat, let nearLng {
+            let dLat = radiusMiles / 69.0
+            let dLng = radiusMiles / (69.0 * max(0.2, cos(nearLat * .pi / 180)))
+            query = query
+                .gte("loc_lat", value: nearLat - dLat)
+                .lte("loc_lat", value: nearLat + dLat)
+                .gte("loc_lng", value: nearLng - dLng)
+                .lte("loc_lng", value: nearLng + dLng)
         }
 
         let jobs: [BoardJob] = try await query
@@ -55,9 +74,19 @@ struct DataService {
             .execute()
             .value
 
-        // Boosted first, then freshest, then newest.
+        func sqDistance(_ job: BoardJob, _ lat: Double, _ lng: Double) -> Double {
+            guard let jLat = job.locLat, let jLng = job.locLng else { return .greatestFiniteMagnitude }
+            let dy = (jLat - lat) * 69.0
+            let dx = (jLng - lng) * 69.0 * cos(lat * .pi / 180)
+            return dy * dy + dx * dx
+        }
+
+        // Boosted first; then nearest (when locating), else freshest, then newest.
         return jobs.sorted { a, b in
             if a.isBoosted != b.isBoosted { return a.isBoosted }
+            if let nearLat, let nearLng {
+                return sqDistance(a, nearLat, nearLng) < sqDistance(b, nearLat, nearLng)
+            }
             let rankA = a.freshnessRank ?? 99
             let rankB = b.freshnessRank ?? 99
             if rankA != rankB { return rankA < rankB }
@@ -67,6 +96,33 @@ struct DataService {
 
     func fetchJob(id: UUID) async throws -> BoardJob {
         try await client.from("board_jobs").select().eq("id", value: id).single().execute().value
+    }
+
+    // MARK: Filter options (complete lists via helper views)
+
+    struct FilterTag: Decodable {
+        let kind: String
+        let value: String
+    }
+
+    struct JobLocation: Decodable {
+        let locCountry: String
+        let locState: String?
+        let jobCount: Int
+
+        enum CodingKeys: String, CodingKey {
+            case locCountry = "loc_country"
+            case locState = "loc_state"
+            case jobCount = "job_count"
+        }
+    }
+
+    func fetchFilterTags() async throws -> [FilterTag] {
+        try await client.from("job_filter_tags").select().execute().value
+    }
+
+    func fetchJobLocations() async throws -> [JobLocation] {
+        try await client.from("job_locations").select().execute().value
     }
 
     // MARK: Candidate profile
@@ -97,10 +153,21 @@ struct DataService {
     }
 
     func updateActiveStatus(profileId: UUID, status: String) async throws {
-        try await client.from("candidate_profiles")
-            .update(["active_status": status])
+        struct StatusUpdate: Encodable {
+            let active_status: String
+            let last_confirmed_at: String
+        }
+        let response = try await client.from("candidate_profiles")
+            .update(StatusUpdate(active_status: status, last_confirmed_at: nowISO))
             .eq("id", value: profileId)
+            .select("id")
             .execute()
+        // PostgREST reports success even when RLS filtered the row out — detect it.
+        if response.data.isEmpty || String(data: response.data, encoding: .utf8) == "[]" {
+            throw NSError(domain: "RoleLantern", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "The change was not saved (no matching profile row — possibly a permissions issue)."
+            ])
+        }
     }
 
     // MARK: Saved jobs

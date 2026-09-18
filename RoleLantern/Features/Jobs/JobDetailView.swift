@@ -40,8 +40,11 @@ struct JobDetailView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     Task {
-                        if let profile = auth.profile {
-                            await jobsVM.toggleSave(candidateId: profile.id, jobId: job.id)
+                        if auth.profile == nil { await auth.loadOrCreateProfile() }
+                        await jobsVM.toggleSave(candidateId: auth.profile?.id, jobId: job.id)
+                        if jobsVM.errorMessage != nil {
+                            statusMessage = jobsVM.errorMessage
+                            jobsVM.errorMessage = nil
                         }
                     }
                 } label: {
@@ -85,9 +88,12 @@ struct JobDetailView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                if job.isBoosted { BoostedBadge() }
-                FreshnessBadge(status: job.jobFreshnessStatus)
+            HStack(spacing: 10) {
+                CompanyAvatar(name: job.companyName, size: 52)
+                VStack(alignment: .leading, spacing: 4) {
+                    if job.isBoosted { BoostedBadge() }
+                    FreshnessBadge(status: job.jobFreshnessStatus)
+                }
             }
             Text(job.jobTitle)
                 .font(.title2.weight(.medium))
@@ -99,8 +105,9 @@ struct JobDetailView: View {
                 if let location = job.locationText, !location.isEmpty {
                     Label(location, systemImage: "mappin.and.ellipse")
                 }
-                Label(job.remoteStatus.replacingOccurrences(of: "_", with: " ").capitalized,
-                      systemImage: "laptopcomputer")
+                if let workMode = job.workModeLabel {
+                    Label(workMode, systemImage: "laptopcomputer")
+                }
                 if let type = job.employmentType {
                     Label(type.capitalized, systemImage: "clock")
                 }

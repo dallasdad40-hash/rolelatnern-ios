@@ -167,7 +167,11 @@ struct CVCard: View {
 
     private func preview() async {
         guard let cv else { return }
-        cvPreviewURL = try? await data.signedCVURL(path: cv.fileUrl)
+        do {
+            cvPreviewURL = try await data.signedCVURL(path: cv.fileUrl)
+        } catch {
+            statusMessage = "Couldn't open your CV: \(error.localizedDescription)"
+        }
     }
 
     private func removeCV() async {

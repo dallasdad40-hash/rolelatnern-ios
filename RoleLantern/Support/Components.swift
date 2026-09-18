@@ -1,6 +1,38 @@
 import SwiftUI
 import SafariServices
 
+/// Company monogram avatar, matching the website's job cards: a colored
+/// circle with the company initial. Color is stable per company name.
+struct CompanyAvatar: View {
+    let name: String
+    var size: CGFloat = 44
+
+    private static let palette: [Color] = [
+        Brand.teal, Brand.navy, Color(hex: 0xD85A30), Color(hex: 0x534AB7),
+        Color(hex: 0x185FA5), Color(hex: 0x993556), Color(hex: 0x3B6D11), Color(hex: 0xBA7517),
+    ]
+
+    private var color: Color {
+        let sum = name.unicodeScalars.reduce(0) { $0 + Int($1.value) }
+        return Self.palette[sum % Self.palette.count]
+    }
+
+    private var initial: String {
+        String(name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased()
+    }
+
+    var body: some View {
+        ZStack {
+            Circle().fill(color.opacity(0.14))
+            Text(initial)
+                .font(.system(size: size * 0.44, weight: .semibold))
+                .foregroundColor(color)
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
 struct TagChip: View {
     let text: String
     var color: Color = Brand.teal

@@ -7,6 +7,7 @@ struct DashboardView: View {
     @State private var savedCount = 0
     @State private var availability = "active"
     @State private var isLoading = true
+    @State private var saveError: String?
 
     private let data = DataService()
 
@@ -28,8 +29,22 @@ struct DashboardView: View {
                 .padding(20)
             }
             .navigationTitle("Dashboard")
-            .refreshable { await load() }
-            .task { await load() }
+            .refreshable {
+                await auth.loadOrCreateProfile()
+                await load()
+            }
+            .alert("Something went wrong", isPresented: .init(
+                get: { saveError != nil },
+                set: { if !$0 { saveError = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(saveError ?? "")
+            }
+            .task {
+                if auth.profile == nil { await auth.loadOrCreateProfile() }
+                await load()
+            }
         }
     }
 
@@ -65,9 +80,16 @@ struct DashboardView: View {
                 // Only write when the user changed it, not when load() refreshed the value.
                 guard !isLoading, newValue != auth.profile?.activeStatus else { return }
                 Task {
-                    if let profile = auth.profile {
-                        try? await data.updateActiveStatus(profileId: profile.id, status: newValue)
+                    guard let profile = auth.profile else {
+                        saveError = "Your profile hasn't loaded — pull to refresh, then try again."
+                        return
+                    }
+                    do {
+                        try await data.updateActiveStatus(profileId: profile.id, status: newValue)
                         await auth.loadOrCreateProfile()
+                    } catch {
+                        saveError = "Availability didn't save: \(error.localizedDescription)"
+                        availability = auth.profile?.activeStatus ?? "active"
                     }
                 }
             }

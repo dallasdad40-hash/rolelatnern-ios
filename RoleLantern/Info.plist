@@ -19,6 +19,8 @@
 	<false/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>RoleLantern uses Face ID to unlock the app and keep your job search private.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Your location is used only to show life-science jobs near you. It is never stored or shared.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

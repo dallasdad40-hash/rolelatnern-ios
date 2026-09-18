@@ -23,6 +23,9 @@ struct BoardJob: Codable, Identifiable, Hashable {
     let niceToHaveSkills: [String]?
     let jobFreshnessStatus: String
     let freshnessRank: Int?
+    let locLat: Double?
+    let locLng: Double?
+    let isRemoteEffective: Bool?
     let lastCheckedAt: Date?
     let boostedUntil: Date?
     let expiresAt: Date?
@@ -55,6 +58,9 @@ struct BoardJob: Codable, Identifiable, Hashable {
         case niceToHaveSkills = "nice_to_have_skills"
         case jobFreshnessStatus = "job_freshness_status"
         case freshnessRank = "freshness_rank"
+        case locLat = "loc_lat"
+        case locLng = "loc_lng"
+        case isRemoteEffective = "is_remote_effective"
         case lastCheckedAt = "last_checked_at"
         case boostedUntil = "boosted_until"
         case expiresAt = "expires_at"
@@ -71,6 +77,14 @@ struct BoardJob: Codable, Identifiable, Hashable {
         return false
     }
     var isPartnerApply: Bool { jobType == "partner_apply" }
+
+    /// Human label for work mode; nil when the source data is unknown.
+    var workModeLabel: String? {
+        if isRemoteEffective == true { return "Remote" }
+        let status = remoteStatus.lowercased()
+        if status == "unknown" || status.isEmpty { return nil }
+        return remoteStatus.replacingOccurrences(of: "_", with: " ").capitalized
+    }
 }
 
 struct StructuredFacts: Codable, Hashable {

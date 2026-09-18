@@ -39,6 +39,8 @@ struct MessagesView: View {
     @EnvironmentObject var auth: AuthViewModel
     @ObservedObject var vm: MessagesViewModel
     @State private var openThread: MessageThread?
+    @State private var pendingThread: MessageThread?
+    @State private var showWebExplainer = false
 
     var body: some View {
         NavigationStack {
@@ -54,7 +56,12 @@ struct MessagesView: View {
                 } else {
                     List(vm.threads) { thread in
                         Button {
-                            openThread = thread
+                            if UserDefaults.standard.bool(forKey: "sawMessagesWebExplainer") {
+                                openThread = thread
+                            } else {
+                                pendingThread = thread
+                                showWebExplainer = true
+                            }
                         } label: {
                             ThreadRow(
                                 thread: thread,
@@ -75,6 +82,16 @@ struct MessagesView: View {
             }) { _ in
                 SafariView(url: AppConfig.webBaseURL.appendingPathComponent("candidate/messages"))
                     .ignoresSafeArea()
+            }
+            .alert("Opening your secure inbox", isPresented: $showWebExplainer) {
+                Button("Continue") {
+                    UserDefaults.standard.set(true, forKey: "sawMessagesWebExplainer")
+                    openThread = pendingThread
+                    pendingThread = nil
+                }
+                Button("Cancel", role: .cancel) { pendingThread = nil }
+            } message: {
+                Text("Message contents are encrypted, so conversations open in RoleLantern's secure web inbox. If it asks you to sign in, that's the website — sign in once and it stays signed in.")
             }
             .task { await vm.refresh(candidateId: auth.profile?.id) }
         }

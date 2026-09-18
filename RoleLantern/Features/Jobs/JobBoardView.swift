@@ -53,8 +53,18 @@ struct JobBoardView: View {
             .sheet(isPresented: $showFilters) {
                 JobFiltersSheet(vm: vm)
             }
+            .alert("Something went wrong", isPresented: .init(
+                get: { vm.errorMessage != nil },
+                set: { if !$0 { vm.errorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(vm.errorMessage ?? "")
+            }
             .task {
                 await vm.load()
+                await vm.loadFilterOptions()
+                if auth.profile == nil { await auth.loadOrCreateProfile() }
                 if let profile = auth.profile {
                     await vm.loadCandidateState(candidateId: profile.id)
                 }
@@ -68,7 +78,9 @@ struct JobRowView: View {
     let isSaved: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .top, spacing: 12) {
+            CompanyAvatar(name: job.companyName)
+            VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 if job.isBoosted { BoostedBadge() }
                 FreshnessBadge(status: job.jobFreshnessStatus)
@@ -89,8 +101,9 @@ struct JobRowView: View {
                 if let location = job.locationText, !location.isEmpty {
                     Label(location, systemImage: "mappin.and.ellipse")
                 }
-                Label(job.remoteStatus.replacingOccurrences(of: "_", with: " ").capitalized,
-                      systemImage: "laptopcomputer")
+                if let workMode = job.workModeLabel {
+                    Label(workMode, systemImage: "laptopcomputer")
+                }
             }
             .font(.caption)
             .foregroundColor(Brand.slate)
@@ -104,6 +117,7 @@ struct JobRowView: View {
                         }
                     }
                 }
+            }
             }
         }
         .padding(14)
@@ -134,10 +148,29 @@ struct JobFiltersSheet: View {
                 Section("Location") {
                     TextField("City, state, or country", text: $vm.location)
                     Toggle("Remote only", isOn: $vm.remoteOnly)
+                    Toggle("Near me", isOn: $vm.nearMe)
+                        .onChange(of: vm.nearMe) { isOn in
+                            if isOn { vm.locationService.request() }
+                        }
+                    if vm.nearMe {
+                        Picker("Within", selection: $vm.radiusMiles) {
+                            Text("25 miles").tag(25.0)
+                            Text("50 miles").tag(50.0)
+                            Text("100 miles").tag(100.0)
+                            Text("250 miles").tag(250.0)
+                        }
+                        if vm.locationService.denied {
+                            Text("Location is off for RoleLantern — enable it in Settings to use Near me.")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                    }
                 }
                 Section {
-                    Button("Clear filters", role: .destructive) {
+                    Button("Clear all filters", role: .destructive) {
                         vm.clearFilters()
+                        dismiss()
+                        Task { await vm.load() }
                     }
                 }
             }

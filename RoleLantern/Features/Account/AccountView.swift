@@ -61,12 +61,12 @@ struct AccountView: View {
                         Label("Privacy Center (web)", systemImage: "hand.raised")
                     }
                     Button {
-                        openURL(AppConfig.webBaseURL.appendingPathComponent("privacy"))
+                        openURL(AppConfig.webBaseURL.appendingPathComponent("legal/privacy"))
                     } label: {
                         Label("Privacy policy", systemImage: "doc.text")
                     }
                     Button {
-                        openURL(AppConfig.webBaseURL.appendingPathComponent("terms"))
+                        openURL(AppConfig.webBaseURL.appendingPathComponent("legal/terms"))
                     } label: {
                         Label("Terms of service", systemImage: "doc.text")
                     }

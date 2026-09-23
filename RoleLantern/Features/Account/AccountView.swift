@@ -2,6 +2,9 @@ import SwiftUI
 
 struct AccountView: View {
     @EnvironmentObject var auth: AuthViewModel
+    @EnvironmentObject var lock: BiometricLockManager
+    @EnvironmentObject var router: AppRouter
+    @State private var showPrivacyCenter = false
     @Environment(\.openURL) private var openURL
 
     @State private var showMFASetup = false
@@ -22,6 +25,20 @@ struct AccountView: View {
                 }
 
                 Section("Security") {
+                    if lock.isAvailable {
+                        Toggle(isOn: Binding(
+                            get: { lock.isEnabled },
+                            set: { wantsOn in
+                                if wantsOn {
+                                    Task { await lock.enable() }
+                                } else {
+                                    lock.disable()
+                                }
+                            }
+                        )) {
+                            Label("Require \(lock.biometryLabel) to open", systemImage: "faceid")
+                        }
+                    }
                     Button {
                         showPasswordSheet = true
                     } label: {
@@ -40,18 +57,18 @@ struct AccountView: View {
                 }
 
                 Section("Privacy") {
-                    Button {
-                        openURL(AppConfig.webBaseURL.appendingPathComponent("candidate/privacy-center"))
+                    NavigationLink(isActive: $showPrivacyCenter) {
+                        PrivacyCenterView()
                     } label: {
-                        Label("Privacy Center (web)", systemImage: "hand.raised")
+                        Label("Privacy Center", systemImage: "hand.raised")
                     }
                     Button {
-                        openURL(AppConfig.webBaseURL.appendingPathComponent("privacy"))
+                        openURL(AppConfig.webBaseURL.appendingPathComponent("legal/privacy"))
                     } label: {
                         Label("Privacy policy", systemImage: "doc.text")
                     }
                     Button {
-                        openURL(AppConfig.webBaseURL.appendingPathComponent("terms"))
+                        openURL(AppConfig.webBaseURL.appendingPathComponent("legal/terms"))
                     } label: {
                         Label("Terms of service", systemImage: "doc.text")
                     }
@@ -65,17 +82,23 @@ struct AccountView: View {
                 }
 
                 Section {
-                    Button("Delete my name & CV", role: .destructive) {
+                    Button("Delete my account", role: .destructive) {
                         showDeleteConfirm = true
                     }
                 } footer: {
-                    Text("Deletion scrubs your name, contact details, and CV from RoleLantern. This cannot be undone. To pause instead, set availability to \"Not looking\" on the dashboard.")
+                    Text("Permanently deletes your account, CV, applications, messages and settings. This cannot be undone. To pause instead, set availability to \"Not looking\" on the dashboard.")
                 }
             }
             .navigationTitle("Account")
+            .onChange(of: router.pending) { dest in
+                if dest == .privacy { showPrivacyCenter = true; router.pending = nil }
+            }
+            .onAppear {
+                if router.pending == .privacy { showPrivacyCenter = true; router.pending = nil }
+            }
             .sheet(isPresented: $showMFASetup) { MFASetupView() }
             .sheet(isPresented: $showPasswordSheet) { ChangePasswordSheet() }
-            .alert("Delete your data?", isPresented: $showDeleteConfirm) {
+            .alert("Delete your account?", isPresented: $showDeleteConfirm) {
                 TextField("Type DELETE to confirm", text: $deleteText)
                 Button("Cancel", role: .cancel) { deleteText = "" }
                 Button("Delete", role: .destructive) {

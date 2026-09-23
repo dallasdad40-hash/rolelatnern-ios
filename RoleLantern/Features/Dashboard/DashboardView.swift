@@ -1,12 +1,18 @@
 import SwiftUI
 
+enum DashRoute: Hashable { case invites, applications, privacy }
+
 struct DashboardView: View {
     @EnvironmentObject var auth: AuthViewModel
+    @EnvironmentObject var router: AppRouter
+    @StateObject private var invitesVM = InvitesViewModel()
+    @State private var path: [DashRoute] = []
     @State private var applications: [ApplicationRecord] = []
     @State private var jobTitles: [UUID: BoardJob] = [:]
     @State private var savedCount = 0
     @State private var availability = "active"
     @State private var isLoading = true
+    @State private var saveError: String?
 
     private let data = DataService()
 
@@ -17,19 +23,100 @@ struct DashboardView: View {
     ]
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     welcome
+                    quickLinks
                     availabilityCard
+                    CVCard()
                     applicationsCard
                 }
                 .padding(20)
             }
             .navigationTitle("Dashboard")
-            .refreshable { await load() }
-            .task { await load() }
+            .navigationDestination(for: DashRoute.self) { route in
+                switch route {
+                case .invites: InvitesView(vm: invitesVM)
+                case .applications: ApplicationsView()
+                case .privacy: PrivacyCenterView()
+                }
+            }
+            .onChange(of: router.pending) { _ in consumePending() }
+            .onAppear { consumePending() }
+            .refreshable {
+                await auth.loadOrCreateProfile()
+                await load()
+                await invitesVM.refresh()
+            }
+            .alert("Something went wrong", isPresented: .init(
+                get: { saveError != nil },
+                set: { if !$0 { saveError = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(saveError ?? "")
+            }
+            .task {
+                if auth.profile == nil { await auth.loadOrCreateProfile() }
+                await load()
+                await invitesVM.refresh()
+            }
         }
+    }
+
+    private func consumePending() {
+        switch router.pending {
+        case .invites: path = [.invites]; router.pending = nil
+        case .applications: path = [.applications]; router.pending = nil
+        default: break
+        }
+    }
+
+    private var quickLinks: some View {
+        VStack(spacing: 0) {
+            quickLink(.invites, icon: "envelope.open", title: "Invites to apply",
+                      detail: invitesVM.openCount > 0 ? "\(invitesVM.openCount) waiting" : "None waiting",
+                      highlight: invitesVM.openCount > 0)
+            Divider().padding(.leading, 48)
+            quickLink(.applications, icon: "checklist", title: "Application tracker",
+                      detail: applications.isEmpty ? "No applications yet" : "\(applications.count) total",
+                      highlight: false)
+            Divider().padding(.leading, 48)
+            quickLink(.privacy, icon: "hand.raised", title: "Privacy Center",
+                      detail: "Visibility, firewall, consent", highlight: false)
+        }
+        .background(Brand.surface.opacity(0.6))
+        .cornerRadius(14)
+    }
+
+    private func quickLink(_ route: DashRoute, icon: String, title: String, detail: String, highlight: Bool) -> some View {
+        NavigationLink(value: route) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .foregroundColor(Brand.teal)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(Brand.navy)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundColor(highlight ? Brand.gold : Brand.slate)
+                }
+                Spacer()
+                if highlight {
+                    Circle().fill(Brand.gold).frame(width: 8, height: 8)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(Brand.slate)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var welcome: some View {
@@ -64,9 +151,16 @@ struct DashboardView: View {
                 // Only write when the user changed it, not when load() refreshed the value.
                 guard !isLoading, newValue != auth.profile?.activeStatus else { return }
                 Task {
-                    if let profile = auth.profile {
-                        try? await data.updateActiveStatus(profileId: profile.id, status: newValue)
+                    guard let profile = auth.profile else {
+                        saveError = "Your profile hasn't loaded — pull to refresh, then try again."
+                        return
+                    }
+                    do {
+                        try await data.updateActiveStatus(profileId: profile.id, status: newValue)
                         await auth.loadOrCreateProfile()
+                    } catch {
+                        saveError = "Availability didn't save: \(error.localizedDescription)"
+                        availability = auth.profile?.activeStatus ?? "active"
                     }
                 }
             }

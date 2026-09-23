@@ -14,7 +14,7 @@ enum AppConfig {
 
     /// Existing web app — used for employer/admin link-out and sensitive server endpoints
     /// (CV parse, identity reveal, evidence match) per the handoff's hybrid recommendation.
-    static let webBaseURL = URL(string: "https://rolelantern.netlify.app")!
+    static let webBaseURL = URL(string: "https://rolelantern.com")!
 
     /// Server endpoints on the existing Next.js app (keep encryption/authorization in one place).
     /// TODO(founder): confirm exact API routes on the web side before release.

@@ -1,5 +1,62 @@
 import SwiftUI
 import SafariServices
+import QuickLook
+
+/// Native document preview (PDF, DOCX, images) for a downloaded local file.
+struct QuickLookPreview: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> QLPreviewController {
+        let controller = QLPreviewController()
+        controller.dataSource = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ controller: QLPreviewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(url: url) }
+
+    final class Coordinator: NSObject, QLPreviewControllerDataSource {
+        let url: URL
+        init(url: URL) { self.url = url }
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+            url as NSURL
+        }
+    }
+}
+
+/// Company monogram avatar, matching the website's job cards: a colored
+/// circle with the company initial. Color is stable per company name.
+struct CompanyAvatar: View {
+    let name: String
+    var size: CGFloat = 44
+
+    private static let palette: [Color] = [
+        Brand.teal, Brand.navy, Color(hex: 0xD85A30), Color(hex: 0x534AB7),
+        Color(hex: 0x185FA5), Color(hex: 0x993556), Color(hex: 0x3B6D11), Color(hex: 0xBA7517),
+    ]
+
+    private var color: Color {
+        let sum = name.unicodeScalars.reduce(0) { $0 + Int($1.value) }
+        return Self.palette[sum % Self.palette.count]
+    }
+
+    private var initial: String {
+        String(name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased()
+    }
+
+    var body: some View {
+        ZStack {
+            Circle().fill(color)
+            Text(initial)
+                .font(.system(size: size * 0.62, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
 
 struct TagChip: View {
     let text: String
@@ -26,7 +83,11 @@ struct FreshnessBadge: View {
             Label("Verified active", systemImage: "checkmark.seal.fill")
                 .font(.caption.weight(.medium))
                 .foregroundColor(Brand.teal)
-        case "stale", "unverified":
+        case "recently_checked":
+            Label("Recently checked", systemImage: "checkmark.seal")
+                .font(.caption.weight(.medium))
+                .foregroundColor(Brand.teal)
+        case "needs_recheck", "stale", "unverified":
             Label("Freshness unconfirmed", systemImage: "clock")
                 .font(.caption)
                 .foregroundColor(Brand.slate)

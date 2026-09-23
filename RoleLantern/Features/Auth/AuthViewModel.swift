@@ -16,6 +16,18 @@ final class AuthViewModel: ObservableObject {
     @Published var phase: Phase = .loading
     @Published var errorMessage: String?
     @Published var infoMessage: String?
+    /// Set when the backend has emailed a one-time code and we're waiting for it.
+    @Published var pendingCodeEmail: String?
+
+    enum ResetStage: Equatable {
+        case newPassword
+    }
+    /// In-app password reset: set after the recovery code is verified.
+    @Published var resetStage: ResetStage?
+
+    /// Remembers the last code request so returning users re-open the entry
+    /// sheet instead of hitting the rate limit with a dead end.
+    private var lastCodeRequest: (email: String, at: Date)?
     @Published var role: String = "candidate"
     @Published var profile: CandidateProfile?
 
@@ -25,6 +37,8 @@ final class AuthViewModel: ObservableObject {
 
     var userId: UUID? { client.auth.currentUser?.id }
     var userEmail: String? { client.auth.currentUser?.email }
+    /// Email from the last successful sign-in on this device.
+    var rememberedEmail: String? { UserDefaults.standard.string(forKey: "lastKnownEmail") }
 
     // MARK: Session lifecycle
 
@@ -54,6 +68,9 @@ final class AuthViewModel: ObservableObject {
             return
         }
         role = client.auth.currentUser?.appMetadata["role"]?.stringValue ?? "candidate"
+        if let email = client.auth.currentUser?.email {
+            UserDefaults.standard.set(email, forKey: "lastKnownEmail")
+        }
         if role == "candidate" {
             await loadOrCreateProfile()
         }
@@ -86,6 +103,7 @@ final class AuthViewModel: ObservableObject {
     // MARK: Email + password
 
     func signIn(email: String, password: String) async {
+        UserDefaults.standard.set(email, forKey: "lastKnownEmail")
         do {
             _ = try await client.auth.signIn(email: email, password: password)
         } catch {
@@ -97,29 +115,116 @@ final class AuthViewModel: ObservableObject {
         do {
             let result = try await client.auth.signUp(email: email, password: password, redirectTo: AppConfig.authRedirectURL)
             if result.session == nil {
-                infoMessage = "Check your inbox to confirm your email, then sign in."
+                // Email confirmation flow: the backend emails a code.
+                pendingCodeEmail = email
             }
         } catch {
             errorMessage = friendly(error)
         }
     }
 
-    func sendMagicLink(email: String) async {
+    /// Codes stay valid for a long time; requesting a new one CANCELS the old.
+    /// So: reuse a recently sent code unless the user explicitly asks to resend.
+    private let codeReuseWindow: TimeInterval = 15 * 60
+
+    func sendMagicLink(email: String, force: Bool = false) async {
+        // Remember the email from the very first attempt, not just successes.
+        UserDefaults.standard.set(email, forKey: "lastKnownEmail")
+        // Open the entry box IMMEDIATELY — never make the user wait to type.
+        pendingCodeEmail = email
+        if !force, let last = lastCodeRequest, last.email == email,
+           Date().timeIntervalSince(last.at) < codeReuseWindow {
+            return  // a valid code is already in their inbox
+        }
         do {
             try await client.auth.signInWithOTP(email: email, redirectTo: AppConfig.authRedirectURL)
-            infoMessage = "Magic link sent — open it on this device to sign in."
+            lastCodeRequest = (email, Date())
+        } catch {
+            if !isRateLimit(error) {
+                errorMessage = friendly(error)
+            }
+            // Rate limited = a code was already emailed; entry stays open.
+        }
+    }
+
+    /// One-shot in-app reset: verifies the emailed code and sets the new
+    /// password in a single action.
+    func resetPassword(email: String, code: String, newPassword: String) async -> Bool {
+        do {
+            _ = try await client.auth.verifyOTP(email: email, token: code, type: .recovery)
+        } catch {
+            errorMessage = friendly(error)
+            return false
+        }
+        do {
+            _ = try await client.auth.update(user: UserAttributes(password: newPassword))
+            infoMessage = "Password updated — you're signed in."
+            return true
+        } catch {
+            // Verified and signed in, but the password change failed.
+            resetStage = .newPassword
+            errorMessage = friendly(error)
+            return true
+        }
+    }
+
+    /// Verifies the emailed one-time code. Tries every code kind the backend
+    /// sends (sign-in, signup confirmation, password reset) so whichever email
+    /// the user reads from, the newest code gets them in.
+    func verifyEmailCode(_ code: String) async {
+        guard let email = pendingCodeEmail else { return }
+        for type in [EmailOTPType.email, .signup, .recovery] {
+            if (try? await client.auth.verifyOTP(email: email, token: code, type: type)) != nil {
+                pendingCodeEmail = nil
+                return
+            }
+        }
+        errorMessage = "That code didn't match. Codes stop working when a newer email arrives — use the code from the most recent email, or wait for the resend timer."
+    }
+
+    private var lastResetRequest: (email: String, at: Date)?
+
+    func hasRecentReset(email: String) -> Bool {
+        guard let last = lastResetRequest else { return false }
+        return last.email == email && Date().timeIntervalSince(last.at) < codeReuseWindow
+    }
+
+    /// Sends a recovery code. Returns true when the user should proceed to code entry
+    /// (also on rate limit — a valid code is already in their inbox).
+    func sendPasswordReset(email: String, force: Bool = false) async -> Bool {
+        UserDefaults.standard.set(email, forKey: "lastKnownEmail")
+        if !force, hasRecentReset(email: email) {
+            return true
+        }
+        do {
+            try await client.auth.resetPasswordForEmail(email, redirectTo: AppConfig.authRedirectURL)
+            lastResetRequest = (email, Date())
+            return true
+        } catch {
+            if isRateLimit(error) {
+                lastResetRequest = (email, Date())
+                return true
+            }
+            errorMessage = friendly(error)
+            return false
+        }
+    }
+
+    /// Verifies the recovery code; on success the user is signed in and moves
+    /// to the new-password step.
+    func verifyResetCode(email: String, code: String) async {
+        do {
+            _ = try await client.auth.verifyOTP(email: email, token: code, type: .recovery)
+            resetStage = .newPassword
         } catch {
             errorMessage = friendly(error)
         }
     }
 
-    func sendPasswordReset(email: String) async {
-        do {
-            try await client.auth.resetPasswordForEmail(email, redirectTo: AppConfig.authRedirectURL)
-            infoMessage = "Password reset email sent."
-        } catch {
-            errorMessage = friendly(error)
-        }
+    private func isRateLimit(_ error: Error) -> Bool {
+        let msg = error.localizedDescription
+        return msg.localizedCaseInsensitiveContains("security purposes")
+            || msg.localizedCaseInsensitiveContains("rate limit")
     }
 
     // MARK: Google OAuth (ASWebAuthenticationSession under the hood)
@@ -200,24 +305,35 @@ final class AuthViewModel: ObservableObject {
     }
 
     func signOut(everywhere: Bool = false) async {
+        await PushManager.removeToken()
         try? await client.auth.signOut(scope: everywhere ? .global : .local)
     }
 
-    /// Apple-required in-app deletion: scrub name + CV, then sign out everywhere.
+    /// Apple-required in-app account deletion (guideline 5.1.1(v)): the server deletes the
+    /// CV files, every RoleLantern record, and the sign-in account itself.
     func deleteAccount() async {
-        guard let profile else { return }
         do {
-            try await data.deleteAccountData(profileId: profile.id, candidateId: profile.id)
-            try? await client.auth.signOut(scope: .global)
+            try await CandidateAPI().deleteAccount()
+            UserDefaults.standard.removeObject(forKey: "lastKnownEmail")
+            UserDefaults.standard.removeObject(forKey: PushManager.tokenKey)
+            // The session is already invalid server-side; clear it locally.
+            try? await client.auth.signOut(scope: .local)
+            profile = nil
+            phase = .signedOut
+            infoMessage = "Your account and data have been deleted."
         } catch {
-            errorMessage = "Deletion failed. Please try again or contact support@rolelantern.com."
+            errorMessage = "Deletion failed: \(error.localizedDescription) If this keeps happening, contact support@rolelantern.com."
         }
     }
 
     private func friendly(_ error: Error) -> String {
-        if let authError = error as? AuthError {
-            return authError.localizedDescription
+        let msg = error.localizedDescription
+        if msg.localizedCaseInsensitiveContains("security purposes") || msg.localizedCaseInsensitiveContains("rate limit") {
+            return "A code was just sent — check your inbox (and spam). You can request another in about a minute."
         }
-        return error.localizedDescription
+        if msg.localizedCaseInsensitiveContains("expired") || msg.localizedCaseInsensitiveContains("invalid") {
+            return "That code expired or didn't match. Tap resend for a fresh one — codes work for a limited time."
+        }
+        return msg
     }
 }

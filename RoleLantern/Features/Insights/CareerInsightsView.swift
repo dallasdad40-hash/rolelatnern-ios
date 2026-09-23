@@ -1,8 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// CV upload + Career Insights (evidence match) — mirrors web /cv-match.
-struct CareerInsightsView: View {
+/// CV upload card (lives on the Dashboard). Evidence match runs from job detail.
+struct CVCard: View {
     @EnvironmentObject var auth: AuthViewModel
     @State private var cv: CVFile?
     @State private var isLoading = true
@@ -14,15 +14,7 @@ struct CareerInsightsView: View {
     private let data = DataService()
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    cvCard
-                    howItWorks
-                }
-                .padding(20)
-            }
-            .navigationTitle("Career insights")
+        cvCard
             .fileImporter(
                 isPresented: $showImporter,
                 allowedContentTypes: [.pdf, UTType(filenameExtension: "docx") ?? .data],
@@ -31,7 +23,7 @@ struct CareerInsightsView: View {
                 Task { await handleImport(result) }
             }
             .sheet(item: $cvPreviewURL) { url in
-                SafariView(url: url).ignoresSafeArea()
+                QuickLookPreview(url: url).ignoresSafeArea()
             }
             .alert("Update", isPresented: .init(
                 get: { statusMessage != nil },
@@ -42,7 +34,6 @@ struct CareerInsightsView: View {
                 Text(statusMessage ?? "")
             }
             .task { await load() }
-        }
     }
 
     private var cvCard: some View {
@@ -91,6 +82,9 @@ struct CareerInsightsView: View {
                 }
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(uploadBusy)
+                Text("This opens your iPhone's file browser — pick your CV and you'll come right back here.")
+                    .font(.caption)
+                    .foregroundColor(Brand.slate)
             }
 
             Label("Private by default — your CV is stored in a private, access-controlled bucket and never shown to your current employer.",
@@ -173,7 +167,18 @@ struct CareerInsightsView: View {
 
     private func preview() async {
         guard let cv else { return }
-        cvPreviewURL = try? await data.signedCVURL(path: cv.fileUrl)
+        do {
+            let signed = try await data.signedCVURL(path: cv.fileUrl)
+            let (fileData, _) = try await URLSession.shared.data(from: signed)
+            var ext = ((cv.fileName ?? "") as NSString).pathExtension.lowercased()
+            if ext.isEmpty { ext = (cv.fileUrl as NSString).pathExtension.lowercased() }
+            let local = FileManager.default.temporaryDirectory
+                .appendingPathComponent("cv-preview.\(ext.isEmpty ? "pdf" : ext)")
+            try fileData.write(to: local, options: .atomic)
+            cvPreviewURL = local
+        } catch {
+            statusMessage = "Couldn't open your CV: \(error.localizedDescription)"
+        }
     }
 
     private func removeCV() async {

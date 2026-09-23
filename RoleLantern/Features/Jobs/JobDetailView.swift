@@ -1,4 +1,5 @@
 import SwiftUI
+import PDFKit
 
 struct JobDetailView: View {
     let job: BoardJob
@@ -7,6 +8,8 @@ struct JobDetailView: View {
 
     @State private var matchReport: CVMatchReport?
     @State private var matchLoading = false
+    /// Full record incl. structured_facts and full description (list fetch is slim).
+    @State private var hydratedJob: BoardJob?
     @State private var showExternalApply = false
     @State private var showApplySheet = false
     @State private var statusMessage: String?
@@ -37,8 +40,11 @@ struct JobDetailView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     Task {
-                        if let profile = auth.profile {
-                            await jobsVM.toggleSave(candidateId: profile.id, jobId: job.id)
+                        if auth.profile == nil { await auth.loadOrCreateProfile() }
+                        await jobsVM.toggleSave(candidateId: auth.profile?.id, jobId: job.id)
+                        if jobsVM.errorMessage != nil {
+                            statusMessage = jobsVM.errorMessage
+                            jobsVM.errorMessage = nil
                         }
                     }
                 } label: {
@@ -74,14 +80,20 @@ struct JobDetailView: View {
         } message: {
             Text(statusMessage ?? "")
         }
-        .task { await loadMatch() }
+        .task {
+            hydratedJob = try? await data.fetchJob(id: job.id)
+            await loadMatch()
+        }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                if job.isBoosted { BoostedBadge() }
-                FreshnessBadge(status: job.jobFreshnessStatus)
+            HStack(spacing: 10) {
+                CompanyAvatar(name: job.companyName, size: 52)
+                VStack(alignment: .leading, spacing: 4) {
+                    if job.isBoosted { BoostedBadge() }
+                    FreshnessBadge(status: job.jobFreshnessStatus)
+                }
             }
             Text(job.jobTitle)
                 .font(.title2.weight(.medium))
@@ -93,8 +105,9 @@ struct JobDetailView: View {
                 if let location = job.locationText, !location.isEmpty {
                     Label(location, systemImage: "mappin.and.ellipse")
                 }
-                Label(job.remoteStatus.replacingOccurrences(of: "_", with: " ").capitalized,
-                      systemImage: "laptopcomputer")
+                if let workMode = job.workModeLabel {
+                    Label(workMode, systemImage: "laptopcomputer")
+                }
                 if let type = job.employmentType {
                     Label(type.capitalized, systemImage: "clock")
                 }
@@ -181,19 +194,23 @@ struct JobDetailView: View {
                     .padding(.vertical, 8)
             } else if let report = matchReport {
                 VStack(alignment: .leading, spacing: 12) {
-                    if let bucket = report.matchBucket {
-                        TagChip(text: bucket.replacingOccurrences(of: "_", with: " ").capitalized, color: Brand.gold)
-                    }
+                    MatchVerdictHeader(report: report)
                     EvidenceList(title: "Why you match", items: report.matchedEvidence,
                                  icon: "checkmark.circle.fill", color: Brand.teal)
-                    EvidenceList(title: "Missing evidence", items: report.missingEvidence,
+                    EvidenceList(title: "This job requires — and your CV doesn't show", items: report.missingEvidence,
                                  icon: "xmark.circle", color: .red.opacity(0.8))
                     EvidenceList(title: "Confirm this", items: report.unclearEvidence,
                                  icon: "questionmark.circle", color: Brand.gold)
+                    Text("Based only on the text of your CV and this posting. If you have these skills, add them to your CV and re-run the match.")
+                        .font(.caption2)
+                        .foregroundColor(Brand.slate)
+                    Button("Re-run match") { Task { await runMatch() } }
+                        .font(.footnote)
+                        .foregroundColor(Brand.teal)
                 }
             } else {
                 VStack(spacing: 10) {
-                    Text("Run an evidence match to see why this role fits your CV — no black-box scores.")
+                    Text("Run an evidence match to see why this role fits your CV — checked right on your device, no black-box scores.")
                         .font(.subheadline)
                         .foregroundColor(Brand.slate)
                     Button("Run evidence match") {
@@ -251,19 +268,86 @@ struct JobDetailView: View {
         matchReport = try? await data.fetchMatchReport(candidateId: profile.id, jobId: job.id)
     }
 
+    /// Runs entirely on-device: reads the CV text (server-parsed if available,
+    /// otherwise extracted locally from the PDF) and compares it to the job.
     private func runMatch() async {
-        guard auth.profile != nil else { return }
+        guard let profile = auth.profile else { return }
         matchLoading = true
         defer { matchLoading = false }
-        do {
-            try await data.requestMatchReport(jobId: job.id)
-            await loadMatch()
-            if matchReport == nil {
-                statusMessage = "Match is being generated — check back in a moment. Make sure you've uploaded a CV first."
-            }
-        } catch {
-            statusMessage = "Could not run the match. Upload a CV first, then try again."
+
+        guard let cv = try? await data.fetchActiveCV(candidateId: profile.id) else {
+            statusMessage = "Upload a CV first (Dashboard tab), then run the match."
+            return
         }
+
+        var cvText = (try? await data.fetchCVText(cvId: cv.id)) ?? nil
+
+        // No server-parsed text yet? Extract locally from the PDF.
+        if cvText == nil || cvText?.isEmpty == true {
+            if (cv.fileType ?? "").contains("pdf") || (cv.fileName ?? "").lowercased().hasSuffix(".pdf") {
+                if let url = try? await data.signedCVURL(path: cv.fileUrl),
+                   let (fileData, _) = try? await URLSession.shared.data(from: url),
+                   let pdf = PDFDocument(data: fileData) {
+                    cvText = pdf.string
+                }
+            }
+        }
+
+        // Enrich with the web pipeline's structured extraction (skills, education,
+        // years of experience) so the match doesn't depend on raw-text phrasing.
+        var corpus = cvText ?? ""
+        if let parsed = try? await data.fetchParsedCV(cvId: cv.id) {
+            let extra = parsed.asMatchText
+            if !extra.isEmpty { corpus += "\n" + extra }
+        }
+
+        guard !corpus.isEmpty else {
+            statusMessage = "Couldn't read your CV's text yet. PDFs work best — try re-uploading as PDF."
+            return
+        }
+
+        matchReport = EvidenceMatchEngine.match(cvText: corpus, job: hydratedJob ?? job, candidateId: profile.id)
+    }
+}
+
+/// Honest, factual verdict header for the evidence match.
+struct MatchVerdictHeader: View {
+    let report: CVMatchReport
+
+    private var verdict: (label: String, detail: String, color: Color) {
+        let missingCount = report.missingEvidence.count
+        switch report.matchBucket {
+        case "strong_match":
+            return ("Strong match", "Your CV shows evidence for everything this posting asks for.", Brand.teal)
+        case "good_match":
+            return ("Good match", "Your CV covers most of what this posting asks for.", Brand.teal)
+        case "possible_stretch":
+            return ("Possible stretch", "This posting asks for \(missingCount) thing\(missingCount == 1 ? "" : "s") we couldn't find in your CV — see below.", Brand.gold)
+        case "likely_not_a_fit":
+            return ("Likely not a fit", "Most of what this posting asks for isn't evident in your CV. The gaps are listed below so you can judge for yourself.", Color.red.opacity(0.85))
+        default:
+            return ("Not enough to assess", "This posting doesn't state enough checkable requirements for a meaningful comparison.", Brand.slate)
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(verdict.color)
+                .frame(width: 4)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(verdict.label)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(verdict.color)
+                Text(verdict.detail)
+                    .font(.caption)
+                    .foregroundColor(Brand.navy)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(verdict.color.opacity(0.08))
+        .cornerRadius(10)
     }
 }
 
@@ -330,7 +414,7 @@ struct PartnerApplySheet: View {
                         Label(cv.fileName ?? "CV on file", systemImage: "doc.fill")
                             .foregroundColor(Brand.navy)
                     } else {
-                        Text("You need a CV to apply. Upload one from the Insights tab first.")
+                        Text("You need a CV to apply. Upload one from the Dashboard tab first.")
                             .foregroundColor(.red)
                     }
                 }
@@ -374,8 +458,8 @@ struct PartnerApplySheet: View {
             dismiss()
         } catch {
             // Unique constraint violation = already applied.
-            if error.localizedDescription.lowercased().contains("duplicate")
-                || error.localizedDescription.contains("23505") {
+            if error.localizedDescription.lowercased().contains("already applied")
+                || error.localizedDescription.lowercased().contains("duplicate") {
                 onFinish(true)
                 dismiss()
             } else {

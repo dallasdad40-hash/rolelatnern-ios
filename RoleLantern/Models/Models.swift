@@ -22,6 +22,10 @@ struct BoardJob: Codable, Identifiable, Hashable {
     let mustHaveSkills: [String]?
     let niceToHaveSkills: [String]?
     let jobFreshnessStatus: String
+    let freshnessRank: Int?
+    let locLat: Double?
+    let locLng: Double?
+    let isRemoteEffective: Bool?
     let lastCheckedAt: Date?
     let boostedUntil: Date?
     let expiresAt: Date?
@@ -30,6 +34,8 @@ struct BoardJob: Codable, Identifiable, Hashable {
     let salaryMax: Int?
     let currency: String?
     let employmentType: String?
+    /// AI-classified requirements/responsibilities from the web ingestion pipeline.
+    let structuredFacts: StructuredFacts?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -51,6 +57,10 @@ struct BoardJob: Codable, Identifiable, Hashable {
         case mustHaveSkills = "must_have_skills"
         case niceToHaveSkills = "nice_to_have_skills"
         case jobFreshnessStatus = "job_freshness_status"
+        case freshnessRank = "freshness_rank"
+        case locLat = "loc_lat"
+        case locLng = "loc_lng"
+        case isRemoteEffective = "is_remote_effective"
         case lastCheckedAt = "last_checked_at"
         case boostedUntil = "boosted_until"
         case expiresAt = "expires_at"
@@ -59,6 +69,7 @@ struct BoardJob: Codable, Identifiable, Hashable {
         case salaryMax = "salary_max"
         case currency
         case employmentType = "employment_type"
+        case structuredFacts = "structured_facts"
     }
 
     var isBoosted: Bool {
@@ -66,6 +77,31 @@ struct BoardJob: Codable, Identifiable, Hashable {
         return false
     }
     var isPartnerApply: Bool { jobType == "partner_apply" }
+
+    /// Human label for work mode; nil when the source data is unknown.
+    var workModeLabel: String? {
+        if isRemoteEffective == true { return "Remote" }
+        let status = remoteStatus.lowercased()
+        if status == "unknown" || status.isEmpty { return nil }
+        return remoteStatus.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+}
+
+struct StructuredFacts: Codable, Hashable {
+    let requirements: [String]?
+    let responsibilities: [String]?
+    let compensation: String?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        requirements = try? container.decodeIfPresent([String].self, forKey: .requirements)
+        responsibilities = try? container.decodeIfPresent([String].self, forKey: .responsibilities)
+        compensation = try? container.decodeIfPresent(String.self, forKey: .compensation)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case requirements, responsibilities, compensation
+    }
 }
 
 // MARK: - Candidate
@@ -151,6 +187,129 @@ struct ApplicationRecord: Codable, Identifiable {
         case status
         case submittedAt = "submitted_at"
         case createdAt = "created_at"
+    }
+}
+
+// MARK: - Parsed CV (structured extraction from the web pipeline)
+
+/// Tolerant decoder: fields arrive from an evolving jsonb-backed pipeline.
+struct ParsedCVData: Codable {
+    let skills: [String]?
+    let therapeuticAreas: [String]?
+    let jobTitles: [String]?
+    let employers: [String]?
+    let certifications: [String]?
+    let systems: [String]?
+    let trialPhases: [String]?
+    let education: String?
+    let yearsOfExperience: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case skills
+        case therapeuticAreas = "therapeutic_areas"
+        case jobTitles = "job_titles"
+        case employers
+        case certifications
+        case systems
+        case trialPhases = "trial_phases"
+        case education
+        case yearsOfExperience = "years_of_experience"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        skills = (try? c.decodeIfPresent([String].self, forKey: .skills)) ?? nil
+        therapeuticAreas = (try? c.decodeIfPresent([String].self, forKey: .therapeuticAreas)) ?? nil
+        jobTitles = (try? c.decodeIfPresent([String].self, forKey: .jobTitles)) ?? nil
+        employers = (try? c.decodeIfPresent([String].self, forKey: .employers)) ?? nil
+        certifications = (try? c.decodeIfPresent([String].self, forKey: .certifications)) ?? nil
+        systems = (try? c.decodeIfPresent([String].self, forKey: .systems)) ?? nil
+        trialPhases = (try? c.decodeIfPresent([String].self, forKey: .trialPhases)) ?? nil
+        education = (try? c.decodeIfPresent(String.self, forKey: .education)) ?? nil
+        yearsOfExperience = (try? c.decodeIfPresent(Int.self, forKey: .yearsOfExperience)) ?? nil
+    }
+
+    /// Flattened into text so the evidence engine can match against it
+    /// alongside the raw CV text.
+    var asMatchText: String {
+        var parts: [String] = []
+        for list in [skills, therapeuticAreas, jobTitles, employers, certifications, systems, trialPhases] {
+            if let list, !list.isEmpty { parts.append(list.joined(separator: ". ")) }
+        }
+        if let education, !education.isEmpty { parts.append(education) }
+        if let years = yearsOfExperience, years > 0 { parts.append("\(years) years of experience") }
+        return parts.joined(separator: "\n")
+    }
+}
+
+// MARK: - Messaging
+
+struct MessageThread: Codable, Identifiable, Hashable {
+    let id: UUID
+    let candidateId: UUID
+    let companyId: UUID
+    let jobId: UUID?
+    let createdAt: Date
+    let lastMessageAt: Date
+    let lastMessagePreview: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case candidateId = "candidate_id"
+        case companyId = "company_id"
+        case jobId = "job_id"
+        case createdAt = "created_at"
+        case lastMessageAt = "last_message_at"
+        case lastMessagePreview = "last_message_preview"
+    }
+
+    /// Previews are encrypted server-side; only show them if readable.
+    var readablePreview: String? {
+        guard let preview = lastMessagePreview, !preview.hasPrefix("enc:") else { return nil }
+        return preview
+    }
+}
+
+/// A fully decrypted message returned by the candidate-messages edge function.
+/// `createdAt` is kept as the raw ISO string (Postgres timestamps carry
+/// microseconds, which Swift's default Date decoder rejects) and parsed lazily.
+struct DecryptedMessage: Codable, Identifiable {
+    let id: UUID
+    let senderRole: String
+    let body: String?
+    let createdAtRaw: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case senderRole = "sender_role"
+        case body
+        case createdAtRaw = "created_at"
+    }
+
+    var isFromCandidate: Bool { senderRole == "candidate" }
+
+    var createdAt: Date {
+        guard let raw = createdAtRaw else { return Date() }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = iso.date(from: raw) { return d }
+        iso.formatOptions = [.withInternetDateTime]
+        if let d = iso.date(from: raw) { return d }
+        return Date()
+    }
+}
+
+struct MessageMeta: Codable, Identifiable {
+    let id: UUID
+    let threadId: UUID
+    let senderRole: String
+    let readAtCandidate: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case threadId = "thread_id"
+        case senderRole = "sender_role"
+        case readAtCandidate = "read_at_candidate"
     }
 }
 

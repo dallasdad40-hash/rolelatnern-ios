@@ -69,9 +69,24 @@ struct MFASetupView: View {
 
     private func enrollSection(uri: String) -> some View {
         VStack(spacing: 16) {
-            Text("Scan this QR code with an authenticator app (e.g. Google Authenticator, 1Password), then enter the 6-digit code below.")
+            // On the phone itself you can't scan the QR — tap instead.
+            if let otpURL = URL(string: uri) {
+                Button {
+                    UIApplication.shared.open(otpURL)
+                } label: {
+                    Label("Set up on this iPhone", systemImage: "key.viewfinder")
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                Text("Opens your authenticator (or the iPhone's built-in Passwords codes). Come back here afterwards to enter the first 6-digit code.")
+                    .font(.caption)
+                    .foregroundColor(Brand.slate)
+                    .multilineTextAlignment(.center)
+            }
+
+            Text("Using a second device? Scan this QR code with its authenticator app instead.")
                 .font(.subheadline)
                 .foregroundColor(Brand.slate)
+                .multilineTextAlignment(.center)
 
             if let qr = qrImage(from: uri) {
                 Image(uiImage: qr)
@@ -86,8 +101,8 @@ struct MFASetupView: View {
             }
 
             if let secret {
-                VStack(spacing: 4) {
-                    Text("Can't scan? Enter this key manually:")
+                VStack(spacing: 6) {
+                    Text("Or enter this key manually in any authenticator:")
                         .font(.caption)
                         .foregroundColor(Brand.slate)
                     Text(secret)
@@ -96,6 +111,14 @@ struct MFASetupView: View {
                         .padding(8)
                         .background(Brand.surface)
                         .cornerRadius(8)
+                    Button {
+                        UIPasteboard.general.string = secret
+                        status = "Key copied."
+                    } label: {
+                        Label("Copy key", systemImage: "doc.on.doc")
+                    }
+                    .font(.footnote)
+                    .foregroundColor(Brand.teal)
                 }
             }
 

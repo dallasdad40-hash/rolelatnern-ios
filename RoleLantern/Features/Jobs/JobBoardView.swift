@@ -103,11 +103,7 @@ struct JobBoardView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Image("LanternLogo")
-                        .resizable()
-                        .interpolation(.high)
-                        .scaledToFit()
-                        .frame(width: 34, height: 34)
+                    LanternMark(size: 32)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

@@ -103,7 +103,16 @@ struct JobBoardView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    LanternMark(size: 32)
+                    HStack(spacing: 8) {
+                        LanternMark(size: 32)
+                        Text("RoleLantern")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("RoleLantern")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

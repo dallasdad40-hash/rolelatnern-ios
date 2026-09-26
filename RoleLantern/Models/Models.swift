@@ -252,6 +252,8 @@ struct MessageThread: Codable, Identifiable, Hashable {
     let createdAt: Date
     let lastMessageAt: Date
     let lastMessagePreview: String?
+    /// Set when the candidate deleted the conversation from their list.
+    var candidateHiddenAt: Date? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -261,6 +263,13 @@ struct MessageThread: Codable, Identifiable, Hashable {
         case createdAt = "created_at"
         case lastMessageAt = "last_message_at"
         case lastMessagePreview = "last_message_preview"
+        case candidateHiddenAt = "candidate_hidden_at"
+    }
+
+    /// Hidden unless a newer message arrived after the candidate deleted it.
+    var isHiddenByCandidate: Bool {
+        guard let hidden = candidateHiddenAt else { return false }
+        return lastMessageAt <= hidden
     }
 
     /// Previews are encrypted server-side; only show them if readable.

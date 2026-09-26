@@ -335,12 +335,24 @@ struct DataService {
     // MARK: Messaging (bodies are encrypted server-side; app shows threads + unread counts)
 
     func fetchThreads(candidateId: UUID) async throws -> [MessageThread] {
-        try await client.from("message_threads")
-            .select("id,candidate_id,company_id,job_id,created_at,last_message_at,last_message_preview")
+        let rows: [MessageThread] = try await client.from("message_threads")
+            .select("id,candidate_id,company_id,job_id,created_at,last_message_at,last_message_preview,candidate_hidden_at")
             .eq("candidate_id", value: candidateId)
             .order("last_message_at", ascending: false)
             .execute()
             .value
+        return rows.filter { !$0.isHiddenByCandidate }
+    }
+
+    /// Candidate-side delete: hides the conversation for the candidate only.
+    /// The employer keeps their copy; a new message brings the thread back.
+    func setThreadHidden(threadId: UUID, hidden: Bool) async throws {
+        struct Payload: Encodable { let action: String; let thread_id: String }
+        struct Wrapper: Decodable { let ok: Bool? }
+        let _: Wrapper = try await client.functions.invoke(
+            "candidate-messages",
+            options: FunctionInvokeOptions(body: Payload(action: hidden ? "hide" : "unhide", thread_id: threadId.uuidString))
+        )
     }
 
     /// Unread employer messages per thread.

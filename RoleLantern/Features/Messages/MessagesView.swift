@@ -12,7 +12,36 @@ final class MessagesViewModel: ObservableObject {
 
     private let data = DataService()
 
+    /// The last deleted conversation, kept briefly so it can be undone.
+    @Published var recentlyDeleted: MessageThread?
+
     var totalUnread: Int { unreadByThread.values.reduce(0, +) }
+
+    func delete(_ thread: MessageThread) async {
+        guard let index = threads.firstIndex(of: thread) else { return }
+        withAnimation { _ = threads.remove(at: index) }
+        let unread = unreadByThread.removeValue(forKey: thread.id)
+        recentlyDeleted = thread
+        do {
+            try await data.setThreadHidden(threadId: thread.id, hidden: true)
+        } catch {
+            // Put it back if the server didn't accept it.
+            withAnimation { threads.insert(thread, at: min(index, threads.count)) }
+            if let unread { unreadByThread[thread.id] = unread }
+            recentlyDeleted = nil
+            return
+        }
+        // Clear the Undo bar after a few seconds.
+        try? await Task.sleep(for: .seconds(5))
+        if recentlyDeleted?.id == thread.id { withAnimation { recentlyDeleted = nil } }
+    }
+
+    func undoDelete(candidateId: UUID?) async {
+        guard let thread = recentlyDeleted else { return }
+        withAnimation { recentlyDeleted = nil }
+        try? await data.setThreadHidden(threadId: thread.id, hidden: false)
+        await refresh(candidateId: candidateId)
+    }
 
     func company(for thread: MessageThread) -> String {
         companyByThread[thread.id] ?? "Employer"
@@ -70,9 +99,39 @@ struct MessagesView: View {
                         }
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
+                        // Swipe left reveals Delete; a tap is required (no full-swipe delete).
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                Task { await vm.delete(thread) }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            .tint(.red)
+                        }
                     }
                     .listStyle(.plain)
                     .refreshable { await vm.refresh(candidateId: auth.profile?.id) }
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if vm.recentlyDeleted != nil {
+                    HStack {
+                        Text("Conversation deleted")
+                            .font(.subheadline)
+                            .foregroundColor(.white)
+                        Spacer()
+                        Button("Undo") {
+                            Task { await vm.undoDelete(candidateId: auth.profile?.id) }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(Brand.gold)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Brand.navy, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
             .navigationTitle("Messages")

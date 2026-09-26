@@ -242,7 +242,9 @@ struct DataService {
 
     func uploadCV(candidateId: UUID, userId: UUID, data: Data, fileName: String, contentType: String) async throws -> CVFile {
         let ext = (fileName as NSString).pathExtension.lowercased()
-        let path = "\(userId.uuidString)/\(UUID().uuidString).\(ext.isEmpty ? "pdf" : ext)"
+        // Storage policy compares the folder to auth.uid() (lowercase), so the
+        // folder must be lowercase; Swift's uuidString is uppercase.
+        let path = "\(userId.uuidString.lowercased())/\(UUID().uuidString.lowercased()).\(ext.isEmpty ? "pdf" : ext)"
 
         try await client.storage.from(AppConfig.cvBucket)
             .upload(path, data: data, options: FileOptions(contentType: contentType))

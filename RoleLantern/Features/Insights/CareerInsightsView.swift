@@ -10,6 +10,7 @@ struct CVCard: View {
     @State private var uploadBusy = false
     @State private var statusMessage: String?
     @State private var cvPreviewURL: URL?
+    @State private var showReview = false
 
     private let data = DataService()
 
@@ -21,6 +22,9 @@ struct CVCard: View {
                 allowsMultipleSelection: false
             ) { result in
                 Task { await handleImport(result) }
+            }
+            .sheet(isPresented: $showReview) {
+                NavigationStack { CVReviewView() }
             }
             .sheet(item: $cvPreviewURL) { url in
                 QuickLookPreview(url: url).ignoresSafeArea()
@@ -71,6 +75,12 @@ struct CVCard: View {
                         Text("Remove").frame(maxWidth: .infinity).padding(.vertical, 14)
                     }
                 }
+                Button {
+                    showReview = true
+                } label: {
+                    Label("AI CV Review: find areas of need", systemImage: "sparkles")
+                }
+                .buttonStyle(PrimaryButtonStyle())
             } else {
                 Text("Upload your CV (PDF or DOCX) to unlock evidence-based match insights and one-tap partner applications.")
                     .font(.subheadline)

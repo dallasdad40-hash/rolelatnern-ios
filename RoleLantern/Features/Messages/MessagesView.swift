@@ -101,7 +101,9 @@ struct MessagesView: View {
                         .listRowBackground(Color.clear)
                         // Swipe left reveals Delete; a tap is required (no full-swipe delete).
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
+                            // Plain button (not role: .destructive): the view model removes the row,
+                            // so the list must not also delete it (that double removal crashes).
+                            Button {
                                 Task { await vm.delete(thread) }
                             } label: {
                                 Label("Delete", systemImage: "trash")

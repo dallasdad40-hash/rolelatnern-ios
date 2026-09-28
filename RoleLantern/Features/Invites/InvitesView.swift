@@ -25,8 +25,11 @@ final class InvitesViewModel: ObservableObject {
             await refresh()
             return
         }
-        try? await Task.sleep(for: .seconds(5))
-        if recentlyRemoved?.id == invite.id { withAnimation { recentlyRemoved = nil } }
+        let removedId = invite.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self else { return }
+            if self.recentlyRemoved?.id == removedId { withAnimation { self.recentlyRemoved = nil } }
+        }
     }
 
     func undoRemove() async {
@@ -83,7 +86,7 @@ struct InvitesView: View {
                             ForEach(open) { invite in
                                 NavigationLink(value: invite) { InviteRow(invite: invite) }
                                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                        Button(role: .destructive) {
+                                        Button {
                                             Task { await vm.remove(invite) }
                                         } label: {
                                             Label("Not interested", systemImage: "hand.thumbsdown")
@@ -98,7 +101,7 @@ struct InvitesView: View {
                             ForEach(answered) { invite in
                                 NavigationLink(value: invite) { InviteRow(invite: invite) }
                                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                        Button(role: .destructive) {
+                                        Button {
                                             Task { await vm.remove(invite) }
                                         } label: {
                                             Label("Remove", systemImage: "trash")
@@ -116,7 +119,9 @@ struct InvitesView: View {
         .modifier(InviteDestination(enabled: declaresDestination, vm: vm))
         .overlay(alignment: .bottom) {
             if vm.recentlyRemoved != nil {
-                UndoBar(text: "Invite removed") { Task { await vm.undoRemove() } }
+                UndoBar(text: "Invite removed",
+                        onUndo: { Task { await vm.undoRemove() } },
+                        onClose: { withAnimation { vm.recentlyRemoved = nil } })
             }
         }
         .refreshable { await vm.refresh() }

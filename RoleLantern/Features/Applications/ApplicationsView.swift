@@ -54,7 +54,7 @@ struct ApplicationsView: View {
                         }
                         .listRowBackground(Color.clear)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
+                            Button {
                                 Task { await remove(app) }
                             } label: {
                                 Label("Remove", systemImage: "trash")
@@ -70,9 +70,9 @@ struct ApplicationsView: View {
         .modifier(JobIdDestination(enabled: declaresDestination))
         .overlay(alignment: .bottom) {
             if recentlyRemoved != nil {
-                UndoBar(text: "Removed from your tracker") {
-                    Task { await undoRemove() }
-                }
+                UndoBar(text: "Removed from your tracker",
+                        onUndo: { Task { await undoRemove() } },
+                        onClose: { withAnimation { recentlyRemoved = nil } })
             }
         }
         .refreshable { await load() }
@@ -97,8 +97,11 @@ struct ApplicationsView: View {
             errorText = error.localizedDescription
             return
         }
-        try? await Task.sleep(for: .seconds(5))
-        if recentlyRemoved?.id == app.id { withAnimation { recentlyRemoved = nil } }
+        // Always clear the Undo bar after 5 seconds, even if this task is cancelled.
+        let removedId = app.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+            if recentlyRemoved?.id == removedId { withAnimation { recentlyRemoved = nil } }
+        }
     }
 
     private func undoRemove() async {
@@ -221,14 +224,22 @@ struct JobIdDestination: ViewModifier {
 struct UndoBar: View {
     let text: String
     let onUndo: () -> Void
+    var onClose: (() -> Void)? = nil
     var body: some View {
-        HStack {
+        HStack(spacing: 14) {
             Text(text).font(.subheadline).foregroundColor(.white)
             Spacer()
             Button("Undo", action: onUndo)
                 .font(.subheadline.weight(.semibold))
                 .foregroundColor(Brand.gold)
+            if let onClose {
+                Button(action: onClose) {
+                    Image(systemName: "xmark").font(.subheadline.weight(.semibold)).foregroundColor(.white.opacity(0.8))
+                }
+                .accessibilityLabel("Dismiss")
+            }
         }
+        .buttonStyle(.borderless)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Brand.navy, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

@@ -78,7 +78,7 @@ struct CVCard: View {
                 Button {
                     showReview = true
                 } label: {
-                    Label("AI CV Review: find areas of need", systemImage: "sparkles")
+                    Label("Lantern AI CV Review", systemImage: "sparkles")
                 }
                 .buttonStyle(PrimaryButtonStyle())
             } else {

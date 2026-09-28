@@ -13,7 +13,7 @@ enum AppDestination: Equatable {
 final class AppRouter: ObservableObject {
     static let shared = AppRouter()
 
-    enum Tab: Hashable { case jobs, saved, messages, dashboard, account }
+    enum Tab: Hashable { case jobs, myJobs, messages, dashboard }
 
     @Published var tab: Tab = .jobs
     @Published var pending: AppDestination?
@@ -21,8 +21,7 @@ final class AppRouter: ObservableObject {
     func open(_ destination: AppDestination) {
         switch destination {
         case .messages: tab = .messages
-        case .invites, .applications: tab = .dashboard
-        case .privacy: tab = .account
+        case .invites, .applications, .privacy: tab = .dashboard
         }
         pending = destination
     }

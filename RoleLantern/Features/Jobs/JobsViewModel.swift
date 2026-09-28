@@ -70,6 +70,10 @@ final class JobsViewModel: ObservableObject {
     // Saved state
     @Published var savedJobIds: Set<UUID> = []
     @Published var appliedJobIds: Set<UUID> = []
+    @Published var dismissedJobIds: Set<UUID> = []
+    /// Last job marked "Not interested", kept briefly for Undo.
+    @Published var recentlyDismissed: BoardJob?
+    private var dismissedIndex = 0
 
     private let data = DataService()
 
@@ -147,14 +151,51 @@ final class JobsViewModel: ObservableObject {
                     radiusMiles: radiusMiles
                 )
             }
+            jobs.removeAll { dismissedJobIds.contains($0.id) }
         } catch {
             errorMessage = "Could not load jobs. Check your connection and try again."
         }
     }
 
+    func notInterested(_ job: BoardJob, candidateId: UUID?) async {
+        guard let candidateId else {
+            errorMessage = "Your profile hasn't loaded yet. Open the Dashboard tab once, then try again."
+            return
+        }
+        dismissedIndex = jobs.firstIndex(of: job) ?? 0
+        withAnimation { jobs.removeAll { $0.id == job.id } }
+        dismissedJobIds.insert(job.id)
+        recentlyDismissed = job
+        do {
+            try await data.dismissJob(candidateId: candidateId, jobId: job.id)
+        } catch {
+            dismissedJobIds.remove(job.id)
+            withAnimation { jobs.insert(job, at: min(dismissedIndex, jobs.count)) }
+            recentlyDismissed = nil
+            errorMessage = "Could not hide that job. Please try again."
+            return
+        }
+        try? await Task.sleep(for: .seconds(5))
+        if recentlyDismissed?.id == job.id { withAnimation { recentlyDismissed = nil } }
+    }
+
+    func undoNotInterested(candidateId: UUID?) async {
+        guard let job = recentlyDismissed, let candidateId else { return }
+        withAnimation {
+            recentlyDismissed = nil
+            jobs.insert(job, at: min(dismissedIndex, jobs.count))
+        }
+        dismissedJobIds.remove(job.id)
+        try? await data.undismissJob(candidateId: candidateId, jobId: job.id)
+    }
+
     func loadCandidateState(candidateId: UUID) async {
         if let saved = try? await data.fetchSavedJobs(candidateId: candidateId) {
             savedJobIds = Set(saved.map(\.jobId))
+        }
+        if let dismissed = try? await data.fetchDismissedJobIds(candidateId: candidateId) {
+            dismissedJobIds = dismissed
+            jobs.removeAll { dismissed.contains($0.id) }
         }
         if let apps = try? await data.fetchApplications(candidateId: candidateId) {
             appliedJobIds = Set(apps.filter { $0.applicationType == "platform_application" }.map(\.jobId))

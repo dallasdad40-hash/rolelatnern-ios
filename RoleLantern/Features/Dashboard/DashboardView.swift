@@ -35,6 +35,9 @@ struct DashboardView: View {
                 .padding(20)
             }
             .navigationTitle("Dashboard")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { ProfileMenuButton() }
+            }
             .navigationDestination(for: DashRoute.self) { route in
                 switch route {
                 case .invites: InvitesView(vm: invitesVM)
@@ -69,6 +72,7 @@ struct DashboardView: View {
         switch router.pending {
         case .invites: path = [.invites]; router.pending = nil
         case .applications: path = [.applications]; router.pending = nil
+        case .privacy: path = [.privacy]; router.pending = nil
         default: break
         }
     }

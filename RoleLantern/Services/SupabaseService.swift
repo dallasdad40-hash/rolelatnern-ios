@@ -195,6 +195,33 @@ struct DataService {
             .execute()
     }
 
+    /// Jobs the candidate marked "Not interested" (same table the website uses).
+    func fetchDismissedJobIds(candidateId: UUID) async throws -> Set<UUID> {
+        struct Row: Decodable { let job_id: UUID }
+        let rows: [Row] = try await client.from("dismissed_jobs")
+            .select("job_id")
+            .eq("candidate_id", value: candidateId)
+            .execute()
+            .value
+        return Set(rows.map(\.job_id))
+    }
+
+    func dismissJob(candidateId: UUID, jobId: UUID) async throws {
+        struct Row: Encodable { let candidate_id: UUID; let job_id: UUID; let reason: String }
+        try await client.from("dismissed_jobs")
+            .upsert(Row(candidate_id: candidateId, job_id: jobId, reason: "not_interested"),
+                    onConflict: "candidate_id,job_id")
+            .execute()
+    }
+
+    func undismissJob(candidateId: UUID, jobId: UUID) async throws {
+        try await client.from("dismissed_jobs")
+            .delete()
+            .eq("candidate_id", value: candidateId)
+            .eq("job_id", value: jobId)
+            .execute()
+    }
+
     func unsaveJob(candidateId: UUID, jobId: UUID) async throws {
         try await client.from("saved_jobs")
             .delete()

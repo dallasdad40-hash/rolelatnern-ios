@@ -135,6 +135,9 @@ struct MessagesView: View {
                 }
             }
             .navigationTitle("Messages")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { ProfileMenuButton() }
+            }
             .navigationDestination(for: MessageThread.self) { thread in
                 ConversationView(
                     thread: thread,

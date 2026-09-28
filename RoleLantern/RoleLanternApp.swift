@@ -112,9 +112,9 @@ struct MainTabView: View {
             JobBoardView()
                 .tabItem { Label("Jobs", systemImage: "briefcase") }
                 .tag(AppRouter.Tab.jobs)
-            SavedJobsView()
-                .tabItem { Label("Saved", systemImage: "bookmark") }
-                .tag(AppRouter.Tab.saved)
+            MyJobsView()
+                .tabItem { Label("My Jobs", systemImage: "bookmark") }
+                .tag(AppRouter.Tab.myJobs)
             MessagesView(vm: messagesVM)
                 .tabItem { Label("Messages", systemImage: "envelope") }
                 .badge(messagesVM.totalUnread)
@@ -122,9 +122,6 @@ struct MainTabView: View {
             DashboardView()
                 .tabItem { Label("Dashboard", systemImage: "rectangle.grid.2x2") }
                 .tag(AppRouter.Tab.dashboard)
-            AccountView()
-                .tabItem { Label("Account", systemImage: "person.crop.circle") }
-                .tag(AppRouter.Tab.account)
         }
         .task {
             await messagesVM.refresh(candidateId: auth.profile?.id)

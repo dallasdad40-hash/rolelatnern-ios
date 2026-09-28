@@ -60,8 +60,26 @@ struct JobBoardView: View {
     }
 
     @EnvironmentObject var auth: AuthViewModel
+    @EnvironmentObject var router: AppRouter
     @StateObject private var vm = JobsViewModel()
+    @StateObject private var tasksVM = HomeTasksViewModel()
     @State private var showFilters = false
+    @State private var showReview = false
+
+    private var locationOff: Bool { !vm.nearMe || vm.locationService.denied }
+
+    private func handle(_ task: HomeTask) {
+        switch task.kind {
+        case .uploadCV: router.tab = .dashboard
+        case .runReview: showReview = true
+        case .protectEmployer: router.open(.privacy)
+        case .turnOnLocation: vm.setNearMe(true)
+        }
+    }
+
+    private func refreshTasks() async {
+        await tasksVM.refresh(candidateId: auth.profile?.id, locationOff: locationOff)
+    }
 
     var body: some View {
         NavigationStack {
@@ -69,7 +87,7 @@ struct JobBoardView: View {
                 if vm.isLoading && vm.jobs.isEmpty {
                     ProgressView("Lighting the way…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if vm.jobs.isEmpty {
+                } else if vm.jobs.isEmpty && tasksVM.tasks.isEmpty {
                     EmptyStateView(
                         title: "No roles found",
                         message: vm.isShowingNearby
@@ -79,18 +97,76 @@ struct JobBoardView: View {
                                 : "New life-science roles are added daily. Check back soon."
                     )
                 } else {
-                    List(vm.jobs) { job in
-                        NavigationLink(value: job) {
-                            JobRowView(job: job, isSaved: vm.savedJobIds.contains(job.id))
+                    List {
+                        if !tasksVM.tasks.isEmpty {
+                            TasksCard(tasks: tasksVM.tasks, onAction: handle)
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
                         }
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
+                        if !vm.jobs.isEmpty {
+                            Text(vm.isShowingNearby ? "Jobs near you" : "Latest life-science jobs")
+                                .font(.title3.weight(.semibold))
+                                .foregroundColor(Brand.navy)
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                                .padding(.top, 6)
+                        }
+                        ForEach(vm.jobs) { job in
+                            NavigationLink(value: job) {
+                                JobRowView(
+                                    job: job,
+                                    isSaved: vm.savedJobIds.contains(job.id),
+                                    onToggleSave: {
+                                        Task { await vm.toggleSave(candidateId: auth.profile?.id, jobId: job.id) }
+                                    },
+                                    onNotInterested: {
+                                        Task { await vm.notInterested(job, candidateId: auth.profile?.id) }
+                                    }
+                                )
+                            }
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                        }
                     }
                     .listStyle(.plain)
-                    .refreshable { await vm.load() }
+                    .scrollContentBackground(.hidden)
+                    .background(Brand.surface)
+                    .refreshable {
+                        await vm.load()
+                        await refreshTasks()
+                    }
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) { nearbyBar }
+            .overlay(alignment: .bottom) {
+                if vm.recentlyDismissed != nil {
+                    HStack {
+                        Label("Job hidden", systemImage: "hand.thumbsdown.fill")
+                            .font(.subheadline)
+                            .foregroundColor(.white)
+                        Spacer()
+                        Button("Undo") {
+                            Task { await vm.undoNotInterested(candidateId: auth.profile?.id) }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(Brand.gold)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Brand.navy, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .sheet(isPresented: $showReview, onDismiss: { Task { await refreshTasks() } }) {
+                NavigationStack { CVReviewView() }
+            }
+            .onChange(of: router.tab) { tab in
+                if tab == .jobs { Task { await refreshTasks() } }
+            }
+            .onChange(of: vm.locationService.denied) { _ in Task { await refreshTasks() } }
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: BoardJob.self) { job in
@@ -114,14 +190,18 @@ struct JobBoardView: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("RoleLantern")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
                         showFilters = true
                     } label: {
                         Image(systemName: vm.hasActiveFilters
                               ? "line.3.horizontal.decrease.circle.fill"
                               : "line.3.horizontal.decrease.circle")
+                            .font(.title3)
+                            .foregroundColor(Brand.navy)
                     }
+                    .accessibilityLabel("Filters")
+                    ProfileMenuButton()
                 }
             }
             .sheet(isPresented: $showFilters) {
@@ -142,6 +222,7 @@ struct JobBoardView: View {
                 if let profile = auth.profile {
                     await vm.loadCandidateState(candidateId: profile.id)
                 }
+                await refreshTasks()
             }
         }
     }
@@ -150,6 +231,8 @@ struct JobBoardView: View {
 struct JobRowView: View {
     let job: BoardJob
     let isSaved: Bool
+    var onToggleSave: (() -> Void)? = nil
+    var onNotInterested: (() -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -159,11 +242,6 @@ struct JobRowView: View {
                 if job.isBoosted { BoostedBadge() }
                 FreshnessBadge(status: job.jobFreshnessStatus)
                 Spacer()
-                if isSaved {
-                    Image(systemName: "bookmark.fill")
-                        .font(.caption)
-                        .foregroundColor(Brand.teal)
-                }
             }
             Text(job.jobTitle)
                 .font(.body.weight(.medium))
@@ -193,10 +271,35 @@ struct JobRowView: View {
                 }
             }
             }
+            if onToggleSave != nil || onNotInterested != nil {
+                VStack(spacing: 18) {
+                    if let onToggleSave {
+                        Button(action: onToggleSave) {
+                            Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
+                                .font(.title3)
+                                .foregroundColor(isSaved ? Brand.teal : Brand.navy)
+                                .frame(width: 32, height: 32)
+                        }
+                        .accessibilityLabel(isSaved ? "Remove from saved" : "Save job")
+                    }
+                    if let onNotInterested {
+                        Button(action: onNotInterested) {
+                            Image(systemName: "hand.thumbsdown")
+                                .font(.title3)
+                                .foregroundColor(Brand.navy)
+                                .frame(width: 32, height: 32)
+                        }
+                        .accessibilityLabel("Not interested")
+                    }
+                }
+                .buttonStyle(.borderless)
+            }
         }
-        .padding(14)
-        .background(Brand.surface.opacity(0.6))
-        .cornerRadius(14)
+        .padding(16)
+        .background(Color.white)
+        .cornerRadius(16)
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Brand.navy.opacity(0.08)))
+        .shadow(color: Brand.navy.opacity(0.04), radius: 6, y: 2)
     }
 }
 

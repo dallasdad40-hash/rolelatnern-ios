@@ -12,8 +12,18 @@ struct AccountView: View {
     @State private var showDeleteConfirm = false
     @State private var deleteText = ""
 
+    /// True when pushed inside another navigation stack (the profile menu).
+    var embedded = false
+
     var body: some View {
-        NavigationStack {
+        if embedded {
+            content
+        } else {
+            NavigationStack { content }
+        }
+    }
+
+    private var content: some View {
             Form {
                 Section("Signed in as") {
                     Label(auth.userEmail ?? "—", systemImage: "envelope")
@@ -89,7 +99,7 @@ struct AccountView: View {
                     Text("Permanently deletes your account, CV, applications, messages and settings. This cannot be undone. To pause instead, set availability to \"Not looking\" on the dashboard.")
                 }
             }
-            .navigationTitle("Account")
+            .navigationTitle("Settings")
             .onChange(of: router.pending) { dest in
                 if dest == .privacy { showPrivacyCenter = true; router.pending = nil }
             }
@@ -110,7 +120,6 @@ struct AccountView: View {
             } message: {
                 Text("Your name, contact details, and CV will be permanently removed and you'll be signed out everywhere.")
             }
-        }
     }
 }
 

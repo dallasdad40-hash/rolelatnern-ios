@@ -90,7 +90,7 @@ struct CVReviewView: View {
                 } else if running {
                     VStack(spacing: 12) {
                         ProgressView()
-                        Text("Reviewing your CV…").font(.subheadline).foregroundColor(Brand.slate)
+                        Text("Lantern AI is reviewing your CV…").font(.subheadline).foregroundColor(Brand.slate)
                         Text("This takes about 20 seconds.").font(.caption).foregroundColor(Brand.slate)
                     }
                     .frame(maxWidth: .infinity).padding(.top, 60)
@@ -106,7 +106,7 @@ struct CVReviewView: View {
             }
             .padding(16)
         }
-        .navigationTitle(jobTitle == nil ? "AI CV Review" : "CV Review for Job")
+        .navigationTitle(jobTitle == nil ? "Lantern AI CV Review" : "Lantern AI: CV vs Job")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }

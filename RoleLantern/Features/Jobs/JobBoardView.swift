@@ -70,7 +70,7 @@ struct JobBoardView: View {
 
     private func handle(_ task: HomeTask) {
         switch task.kind {
-        case .uploadCV: router.tab = .profile
+        case .uploadCV, .updateCV: router.tab = .profile
         case .runReview: showReview = true
         case .protectEmployer: router.tab = .profile
         case .turnOnLocation: vm.setNearMe(true)
@@ -99,7 +99,7 @@ struct JobBoardView: View {
                 } else {
                     List {
                         if !tasksVM.tasks.isEmpty {
-                            TasksCard(tasks: tasksVM.tasks, onAction: handle)
+                            TasksCard(tasks: tasksVM.tasks, onAction: handle, onDismiss: { tasksVM.dismissForThirtyDays() })
                                 .listRowSeparator(.hidden)
                                 .listRowBackground(Color.clear)
                                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))

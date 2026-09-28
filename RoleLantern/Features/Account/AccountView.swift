@@ -78,6 +78,11 @@ struct AccountView: View {
                         Label("Privacy policy", systemImage: "doc.text")
                     }
                     Button {
+                        openURL(AppConfig.webBaseURL.appendingPathComponent("candidate/privacy-center"))
+                    } label: {
+                        Label("Download a copy of my data", systemImage: "square.and.arrow.down")
+                    }
+                    Button {
                         openURL(AppConfig.webBaseURL.appendingPathComponent("legal/terms"))
                     } label: {
                         Label("Terms of service", systemImage: "doc.text")

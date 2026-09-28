@@ -13,6 +13,31 @@ struct PrivacyCenterView: View {
     @State private var newBlock = ""
     @State private var showAddBlock = false
     @State private var pendingRemoval: BlockedEmployer?
+    /// Activity older than this is cleared from the candidate's view (the server keeps its record).
+    @AppStorage("privacyActivityClearedAt") private var activityClearedAt: Double = 0
+
+    /// Activity to show: newer than the last Clear, and with block/unblock pairs removed
+    /// (unblocking an employer hides both the "Unblocked" and its matching "Blocked" line).
+    private var visibleAudit: [PrivacyAuditEntry] {
+        let recent = audit.filter { (ISODate.parse($0.createdAt)?.timeIntervalSince1970 ?? 0) > activityClearedAt }
+        let oldestFirst = recent.sorted { (ISODate.parse($0.createdAt) ?? .distantPast) < (ISODate.parse($1.createdAt) ?? .distantPast) }
+        var openBlocks: [String: [UUID]] = [:]
+        var hidden = Set<UUID>()
+        for entry in oldestFirst {
+            let name = employerName(entry).lowercased()
+            if entry.kind == "employer_blocked" {
+                openBlocks[name, default: []].append(entry.id)
+            } else if entry.kind == "employer_unblocked" {
+                hidden.insert(entry.id)
+                if let blockId = openBlocks[name]?.popLast() { hidden.insert(blockId) }
+            }
+        }
+        return recent.filter { !hidden.contains($0.id) }
+    }
+
+    private func employerName(_ entry: PrivacyAuditEntry) -> String {
+        (entry.detail ?? "").replacingOccurrences(of: " (iOS app)", with: "").trimmingCharacters(in: .whitespaces)
+    }
     @Environment(\.openURL) private var openURL
 
     private let api = CandidateAPI()
@@ -77,6 +102,10 @@ struct PrivacyCenterView: View {
                         // The search card depends on being discoverable.
                         if !on { s.wrappedValue.anonymousSearchOptin = false }
                     }
+                    .onChange(of: s.wrappedValue.anonymousSearchOptin) { on in
+                        // An anonymous card must never show contact details.
+                        if on { s.wrappedValue.redactContactDetails = true }
+                    }
                 Toggle(isOn: s.anonymousSearchOptin) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Show my anonymous card in search")
@@ -98,32 +127,35 @@ struct PrivacyCenterView: View {
             }
 
             Section {
-                Toggle("Lock my CV", isOn: s.cvLocked)
-                Toggle("Hide my contact details", isOn: s.redactContactDetails)
-                Toggle("Hide my current employer", isOn: s.redactCurrentEmployer)
+                ProtectionToggle(
+                    title: "Lock my CV",
+                    detail: "Employers can't open your CV until you apply or accept an invite.",
+                    isOn: s.cvLocked
+                )
+                ProtectionToggle(
+                    title: "Hide my contact details",
+                    detail: s.wrappedValue.anonymousSearchOptin
+                        ? "Required while your anonymous card is visible."
+                        : "Your email and phone never show on your profile.",
+                    isOn: s.redactContactDetails,
+                    locked: s.wrappedValue.anonymousSearchOptin
+                )
+                ProtectionToggle(
+                    title: "Hide my current employer",
+                    detail: "Other companies won't see where you work now. Your firewall already stops your current employer from seeing you at all.",
+                    isOn: s.redactCurrentEmployer
+                )
                 Picker("Reveal my identity", selection: s.identityRevealPolicy) {
                     Text("Only when I approve").tag("manual")
                     Text("When I accept an invite").tag("on_accept")
                 }
             } header: {
-                Text("Identity and CV")
-            }
-
-            Section {
-                Picker("Invites per week", selection: s.inviteLimitPerWeek) {
-                    ForEach([0, 1, 3, 5, 10, 20], id: \.self) { n in
-                        Text(n == 0 ? "No invites" : "Up to \(n)").tag(n)
-                    }
-                }
-                Picker("Salary expectations", selection: s.salaryVisibility) {
-                    ForEach(salaryOptions, id: \.0) { value, label in Text(label).tag(value) }
-                }
-            } header: {
-                Text("Invites and salary")
+                Text("Your protections")
             }
 
             Section {
                 Toggle("Also block parent and sister companies", isOn: s.autoProtectParentSubsidiaries)
+                    .tint(.green)
                 ForEach(blocked) { employer in
                     HStack {
                         Label(employer.companyNameRaw ?? "Employer", systemImage: "shield.lefthalf.filled")
@@ -161,9 +193,9 @@ struct PrivacyCenterView: View {
                 }
             }
 
-            if !audit.isEmpty {
-                Section("Recent privacy activity") {
-                    ForEach(audit.prefix(10)) { entry in
+            if !visibleAudit.isEmpty {
+                Section {
+                    ForEach(visibleAudit.prefix(10)) { entry in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(auditTitle(entry))
                                 .font(.subheadline)
@@ -175,14 +207,19 @@ struct PrivacyCenterView: View {
                             }
                         }
                     }
-                }
-            }
-
-            Section {
-                Button {
-                    openURL(AppConfig.webBaseURL.appendingPathComponent("candidate/privacy-center"))
-                } label: {
-                    Label("Download or correct my data (web)", systemImage: "arrow.up.right.square")
+                } header: {
+                    HStack {
+                        Text("Recent privacy activity")
+                        Spacer()
+                        Button("Clear") {
+                            withAnimation { activityClearedAt = Date().timeIntervalSince1970 }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .textCase(nil)
+                        .buttonStyle(.borderless)
+                    }
+                } footer: {
+                    Text("Clearing removes this list from your screen. RoleLantern keeps a private copy as proof of your privacy choices.")
                 }
             }
         }
@@ -250,5 +287,32 @@ struct PrivacyCenterView: View {
         let hadEdits = settings != saved
         await load()
         if hadEdits { settings = pending }
+    }
+}
+
+/// A protection switch with a one-line explanation; can be locked on.
+private struct ProtectionToggle: View {
+    let title: String
+    let detail: String
+    @Binding var isOn: Bool
+    var locked = false
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(title).foregroundColor(Brand.navy)
+                    if locked {
+                        Image(systemName: "lock.fill").font(.caption).foregroundColor(Brand.slate)
+                    }
+                }
+                Text(detail)
+                    .font(.caption)
+                    .foregroundColor(Brand.slate)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .tint(.green)
+        .disabled(locked)
     }
 }

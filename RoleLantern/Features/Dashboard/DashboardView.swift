@@ -6,7 +6,8 @@ struct DashboardView: View {
     @EnvironmentObject var auth: AuthViewModel
     @EnvironmentObject var router: AppRouter
     @StateObject private var invitesVM = InvitesViewModel()
-    @State private var path: [DashRoute] = []
+    // NavigationPath (not [DashRoute]) so job and invite details can be pushed too.
+    @State private var path = NavigationPath()
     @State private var applications: [ApplicationRecord] = []
     @State private var jobTitles: [UUID: BoardJob] = [:]
     @State private var savedCount = 0
@@ -29,7 +30,6 @@ struct DashboardView: View {
                     welcome
                     quickLinks
                     availabilityCard
-                    CVCard()
                     applicationsCard
                 }
                 .padding(20)
@@ -40,10 +40,17 @@ struct DashboardView: View {
             }
             .navigationDestination(for: DashRoute.self) { route in
                 switch route {
-                case .invites: InvitesView(vm: invitesVM)
-                case .applications: ApplicationsView()
+                case .invites: InvitesView(vm: invitesVM, declaresDestination: false)
+                case .applications: ApplicationsView(declaresDestination: false)
                 case .privacy: PrivacyCenterView()
                 }
+            }
+            // Root-level destinations (a stack's path only honors these).
+            .navigationDestination(for: UUID.self) { jobId in
+                JobDetailLoader(jobId: jobId)
+            }
+            .navigationDestination(for: CandidateInvite.self) { invite in
+                InviteDetailView(invite: invite, vm: invitesVM)
             }
             .onChange(of: router.pending) { _ in consumePending() }
             .onAppear { consumePending() }
@@ -70,9 +77,9 @@ struct DashboardView: View {
 
     private func consumePending() {
         switch router.pending {
-        case .invites: path = [.invites]; router.pending = nil
-        case .applications: path = [.applications]; router.pending = nil
-        case .privacy: path = [.privacy]; router.pending = nil
+        case .invites: path = NavigationPath([DashRoute.invites]); router.pending = nil
+        case .applications: path = NavigationPath([DashRoute.applications]); router.pending = nil
+        case .privacy: path = NavigationPath([DashRoute.privacy]); router.pending = nil
         default: break
         }
     }

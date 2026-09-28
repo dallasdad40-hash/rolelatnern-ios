@@ -13,7 +13,7 @@ enum AppDestination: Equatable {
 final class AppRouter: ObservableObject {
     static let shared = AppRouter()
 
-    enum Tab: Hashable { case jobs, myJobs, messages, dashboard }
+    enum Tab: Hashable { case jobs, myJobs, messages, dashboard, profile }
 
     @Published var tab: Tab = .jobs
     @Published var pending: AppDestination?

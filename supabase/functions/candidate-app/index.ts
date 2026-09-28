@@ -89,6 +89,7 @@ Deno.serve(async (req: Request) => {
       const { data: apps, error } = await admin.from('applications')
         .select('id,job_id,application_type,status,submitted_at,external_click_at,created_at,updated_at')
         .eq('candidate_id', candidateId)
+        .is('candidate_hidden_at', null)
         .order('created_at', { ascending: false });
       if (error) throw error;
       const jobs = await jobInfo(admin, (apps ?? []).map((a) => a.job_id));
@@ -108,6 +109,7 @@ Deno.serve(async (req: Request) => {
       const { data: invites, error } = await admin.from('employer_candidate_invites')
         .select('id,job_id,employer_id,status,message,sent_at,responded_at')
         .eq('candidate_id', candidateId)
+        .is('candidate_hidden_at', null)
         .order('sent_at', { ascending: false });
       if (error) throw error;
       const companies = await employerCompanies(admin, (invites ?? []).map((i) => i.employer_id));
@@ -178,6 +180,35 @@ Deno.serve(async (req: Request) => {
         }
       }
       return json({ ok: true, status: 'accepted' });
+    }
+
+    // ---------- Remove from my lists (candidate view only) ----------
+    if (action === 'hide_application' || action === 'unhide_application') {
+      const id = String(body.id ?? '');
+      const { data, error } = await admin.from('applications')
+        .update({ candidate_hidden_at: action === 'hide_application' ? new Date().toISOString() : null })
+        .eq('id', id).eq('candidate_id', candidateId).select('id');
+      if (error) throw error;
+      if (!data?.length) return json({ error: 'Not found.' }, 404);
+      return json({ ok: true });
+    }
+
+    if (action === 'hide_invite' || action === 'unhide_invite') {
+      const id = String(body.id ?? '');
+      const { data: inv } = await admin.from('employer_candidate_invites')
+        .select('id,status').eq('id', id).eq('candidate_id', candidateId).maybeSingle();
+      if (!inv) return json({ error: 'Not found.' }, 404);
+      const now = new Date().toISOString();
+      if (action === 'hide_invite') {
+        // Removing an unanswered invite means "not interested": decline it too, so the
+        // employer isn't left waiting. Answered invites are only hidden.
+        const patch: Record<string, unknown> = { candidate_hidden_at: now };
+        if (['sent', 'viewed'].includes(inv.status)) { patch.status = 'declined'; patch.responded_at = now; }
+        await admin.from('employer_candidate_invites').update(patch).eq('id', inv.id);
+      } else {
+        await admin.from('employer_candidate_invites').update({ candidate_hidden_at: null }).eq('id', inv.id);
+      }
+      return json({ ok: true });
     }
 
     // ---------- Privacy Center ----------

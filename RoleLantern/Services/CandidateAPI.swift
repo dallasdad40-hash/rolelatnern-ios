@@ -205,6 +205,21 @@ struct CandidateAPI {
         let _: R = try await call(B(invite_id: invite.id.uuidString, decision: accept ? "accept" : "decline"))
     }
 
+    // MARK: Remove from my lists (candidate view only)
+
+    func setApplicationHidden(_ id: UUID, hidden: Bool) async throws {
+        struct B: Encodable { let action: String; let id: String }
+        struct R: Decodable { let ok: Bool? }
+        let _: R = try await call(B(action: hidden ? "hide_application" : "unhide_application", id: id.uuidString))
+    }
+
+    /// Hiding an unanswered invite also declines it on the server.
+    func setInviteHidden(_ id: UUID, hidden: Bool) async throws {
+        struct B: Encodable { let action: String; let id: String }
+        struct R: Decodable { let ok: Bool? }
+        let _: R = try await call(B(action: hidden ? "hide_invite" : "unhide_invite", id: id.uuidString))
+    }
+
     // MARK: Privacy Center
 
     func privacy() async throws -> PrivacyCenterData {

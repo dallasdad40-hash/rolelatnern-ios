@@ -70,9 +70,9 @@ struct JobBoardView: View {
 
     private func handle(_ task: HomeTask) {
         switch task.kind {
-        case .uploadCV: router.tab = .dashboard
+        case .uploadCV: router.tab = .profile
         case .runReview: showReview = true
-        case .protectEmployer: router.open(.privacy)
+        case .protectEmployer: router.tab = .profile
         case .turnOnLocation: vm.setNearMe(true)
         }
     }

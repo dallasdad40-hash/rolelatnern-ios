@@ -122,6 +122,9 @@ struct MainTabView: View {
             DashboardView()
                 .tabItem { Label("Dashboard", systemImage: "rectangle.grid.2x2") }
                 .tag(AppRouter.Tab.dashboard)
+            ProfileView()
+                .tabItem { Label("Profile", systemImage: "person.crop.circle") }
+                .tag(AppRouter.Tab.profile)
         }
         .task {
             await messagesVM.refresh(candidateId: auth.profile?.id)

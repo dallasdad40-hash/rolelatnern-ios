@@ -12,6 +12,7 @@ struct PrivacyCenterView: View {
     @State private var errorText: String?
     @State private var newBlock = ""
     @State private var showAddBlock = false
+    @State private var pendingRemoval: BlockedEmployer?
     @Environment(\.openURL) private var openURL
 
     private let api = CandidateAPI()
@@ -43,6 +44,19 @@ struct PrivacyCenterView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(errorText ?? "")
+        }
+        .confirmationDialog(
+            "Remove \(pendingRemoval?.companyNameRaw ?? "this employer") from your firewall?",
+            isPresented: .init(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let item = pendingRemoval { Task { await remove([item]) } }
+                pendingRemoval = nil
+            }
+            Button("Cancel", role: .cancel) { pendingRemoval = nil }
+        } message: {
+            Text("They will be able to find your anonymous profile again, like any other employer.")
         }
         .alert("Block an employer", isPresented: $showAddBlock) {
             TextField("Company name", text: $newBlock)
@@ -94,8 +108,14 @@ struct PrivacyCenterView: View {
             Section {
                 Toggle("Also block parent and sister companies", isOn: s.autoProtectParentSubsidiaries)
                 ForEach(blocked) { employer in
-                    Label(employer.companyNameRaw ?? "Employer", systemImage: "shield.lefthalf.filled")
-                        .foregroundColor(Brand.navy)
+                    HStack {
+                        Label(employer.companyNameRaw ?? "Employer", systemImage: "shield.lefthalf.filled")
+                            .foregroundColor(Brand.navy)
+                        Spacer()
+                        Button("Remove", role: .destructive) { pendingRemoval = employer }
+                            .buttonStyle(.borderless)
+                            .font(.subheadline.weight(.medium))
+                    }
                 }
                 .onDelete { idx in
                     let items = idx.map { blocked[$0] }
@@ -109,7 +129,7 @@ struct PrivacyCenterView: View {
             } header: {
                 Text("Employer firewall")
             } footer: {
-                Text("Blocked employers can never see, find, or contact you. This overrides every other setting. Swipe left to remove one.")
+                Text("Blocked employers can never see, find, or contact you. This overrides every other setting.")
             }
 
             if s.wrappedValue != saved {

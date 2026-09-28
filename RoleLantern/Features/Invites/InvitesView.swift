@@ -9,7 +9,32 @@ final class InvitesViewModel: ObservableObject {
 
     private let api = CandidateAPI()
 
+    /// Last invite removed, kept briefly for Undo.
+    @Published var recentlyRemoved: CandidateInvite?
+
     var openCount: Int { invites.filter(\.isOpen).count }
+
+    func remove(_ invite: CandidateInvite) async {
+        withAnimation { invites.removeAll { $0.id == invite.id } }
+        recentlyRemoved = invite
+        do {
+            try await api.setInviteHidden(invite.id, hidden: true)
+        } catch {
+            recentlyRemoved = nil
+            errorText = error.localizedDescription
+            await refresh()
+            return
+        }
+        try? await Task.sleep(for: .seconds(5))
+        if recentlyRemoved?.id == invite.id { withAnimation { recentlyRemoved = nil } }
+    }
+
+    func undoRemove() async {
+        guard let invite = recentlyRemoved else { return }
+        withAnimation { recentlyRemoved = nil }
+        try? await api.setInviteHidden(invite.id, hidden: false)
+        await refresh()
+    }
 
     func refresh() async {
         isLoading = invites.isEmpty
@@ -35,6 +60,8 @@ final class InvitesViewModel: ObservableObject {
 
 struct InvitesView: View {
     @ObservedObject var vm: InvitesViewModel
+    /// False when a parent stack (My Jobs) already declares the invite destination.
+    var declaresDestination = true
 
     var body: some View {
         Group {
@@ -55,6 +82,14 @@ struct InvitesView: View {
                         Section("Waiting for you") {
                             ForEach(open) { invite in
                                 NavigationLink(value: invite) { InviteRow(invite: invite) }
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                        Button(role: .destructive) {
+                                            Task { await vm.remove(invite) }
+                                        } label: {
+                                            Label("Not interested", systemImage: "hand.thumbsdown")
+                                        }
+                                        .tint(.red)
+                                    }
                             }
                         }
                     }
@@ -62,6 +97,14 @@ struct InvitesView: View {
                         Section("Answered") {
                             ForEach(answered) { invite in
                                 NavigationLink(value: invite) { InviteRow(invite: invite) }
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                        Button(role: .destructive) {
+                                            Task { await vm.remove(invite) }
+                                        } label: {
+                                            Label("Remove", systemImage: "trash")
+                                        }
+                                        .tint(.red)
+                                    }
                             }
                         }
                     }
@@ -70,8 +113,11 @@ struct InvitesView: View {
             }
         }
         .navigationTitle("Invites")
-        .navigationDestination(for: CandidateInvite.self) { invite in
-            InviteDetailView(invite: invite, vm: vm)
+        .modifier(InviteDestination(enabled: declaresDestination, vm: vm))
+        .overlay(alignment: .bottom) {
+            if vm.recentlyRemoved != nil {
+                UndoBar(text: "Invite removed") { Task { await vm.undoRemove() } }
+            }
         }
         .refreshable { await vm.refresh() }
         .task { await vm.refresh() }
@@ -224,6 +270,20 @@ struct InviteDetailView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(vm.errorText ?? "")
+        }
+    }
+}
+
+struct InviteDestination: ViewModifier {
+    let enabled: Bool
+    @ObservedObject var vm: InvitesViewModel
+    func body(content: Content) -> some View {
+        if enabled {
+            content.navigationDestination(for: CandidateInvite.self) { invite in
+                InviteDetailView(invite: invite, vm: vm)
+            }
+        } else {
+            content
         }
     }
 }

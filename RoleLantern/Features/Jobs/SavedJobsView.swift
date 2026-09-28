@@ -27,12 +27,22 @@ struct MyJobsView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+                .padding(.top, 10)
+
+                Text(section == .invites
+                     ? "Swipe left on an invite to mark it Not interested or remove it."
+                     : section == .applied
+                        ? "Swipe left on a role to remove it from your tracker."
+                        : "Tap the bookmark to remove a saved job.")
+                    .font(.caption)
+                    .foregroundColor(Brand.slate)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
 
                 switch section {
                 case .saved: SavedJobsList(jobsVM: jobsVM)
-                case .applied: ApplicationsView()
-                case .invites: InvitesView(vm: invitesVM)
+                case .applied: ApplicationsView(declaresDestination: false)
+                case .invites: InvitesView(vm: invitesVM, declaresDestination: false)
                 }
             }
             .background(Brand.surface.ignoresSafeArea())
@@ -40,6 +50,12 @@ struct MyJobsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: BoardJob.self) { job in
                 JobDetailView(job: job, jobsVM: jobsVM)
+            }
+            .navigationDestination(for: UUID.self) { jobId in
+                JobDetailLoader(jobId: jobId)
+            }
+            .navigationDestination(for: CandidateInvite.self) { invite in
+                InviteDetailView(invite: invite, vm: invitesVM)
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { ProfileMenuButton() }

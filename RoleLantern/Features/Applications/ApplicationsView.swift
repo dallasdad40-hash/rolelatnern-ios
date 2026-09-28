@@ -3,7 +3,10 @@ import SwiftUI
 /// Application tracker: every role the candidate applied to (in-app) or opened
 /// on the company site, with the latest status from the employer.
 struct ApplicationsView: View {
+    /// False when a parent stack (My Jobs) already declares the job destination.
+    var declaresDestination = true
     @State private var applications: [TrackedApplication] = []
+    @State private var recentlyRemoved: TrackedApplication?
     @State private var isLoading = true
     @State private var errorText: String?
     @State private var filter: Filter = .all
@@ -50,14 +53,27 @@ struct ApplicationsView: View {
                             ApplicationRow(app: app)
                         }
                         .listRowBackground(Color.clear)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                Task { await remove(app) }
+                            } label: {
+                                Label("Remove", systemImage: "trash")
+                            }
+                            .tint(.red)
+                        }
                     }
                 }
                 .listStyle(.plain)
             }
         }
         .navigationTitle("Applications")
-        .navigationDestination(for: UUID.self) { jobId in
-            JobDetailLoader(jobId: jobId)
+        .modifier(JobIdDestination(enabled: declaresDestination))
+        .overlay(alignment: .bottom) {
+            if recentlyRemoved != nil {
+                UndoBar(text: "Removed from your tracker") {
+                    Task { await undoRemove() }
+                }
+            }
         }
         .refreshable { await load() }
         .task { await load() }
@@ -68,6 +84,28 @@ struct ApplicationsView: View {
         } message: {
             Text(errorText ?? "")
         }
+    }
+
+    private func remove(_ app: TrackedApplication) async {
+        withAnimation { applications.removeAll { $0.id == app.id } }
+        recentlyRemoved = app
+        do {
+            try await api.setApplicationHidden(app.id, hidden: true)
+        } catch {
+            recentlyRemoved = nil
+            await load()
+            errorText = error.localizedDescription
+            return
+        }
+        try? await Task.sleep(for: .seconds(5))
+        if recentlyRemoved?.id == app.id { withAnimation { recentlyRemoved = nil } }
+    }
+
+    private func undoRemove() async {
+        guard let app = recentlyRemoved else { return }
+        withAnimation { recentlyRemoved = nil }
+        try? await api.setApplicationHidden(app.id, hidden: false)
+        await load()
     }
 
     private func load() async {
@@ -164,5 +202,38 @@ struct JobDetailLoader: View {
             }
             do { job = try await DataService().fetchJob(id: jobId) } catch { failed = true }
         }
+    }
+}
+
+/// Declares the job-id destination unless a parent stack already does.
+struct JobIdDestination: ViewModifier {
+    let enabled: Bool
+    func body(content: Content) -> some View {
+        if enabled {
+            content.navigationDestination(for: UUID.self) { jobId in JobDetailLoader(jobId: jobId) }
+        } else {
+            content
+        }
+    }
+}
+
+/// Dark "…removed · Undo" bar shown for a few seconds after a removal.
+struct UndoBar: View {
+    let text: String
+    let onUndo: () -> Void
+    var body: some View {
+        HStack {
+            Text(text).font(.subheadline).foregroundColor(.white)
+            Spacer()
+            Button("Undo", action: onUndo)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(Brand.gold)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Brand.navy, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 }

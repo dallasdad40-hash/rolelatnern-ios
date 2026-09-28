@@ -15,7 +15,7 @@ struct HelpCenterView: View {
     private let topics: [Topic] = [
         Topic(title: "Getting started", icon: "flag", items: [
             ("How do I get started?",
-             "Upload your CV from the Dashboard, run a Lantern AI CV Review to see your areas of need, then browse jobs. Jobs near you show first, plus remote roles."),
+             "Upload your CV from the Profile tab, run a Lantern AI CV Review to see your areas of need, then browse jobs. Jobs near you show first, plus remote roles."),
             ("Is RoleLantern free for candidates?",
              "Yes. Searching, saving, applying and messaging employers are free for candidates."),
         ]),
@@ -28,6 +28,8 @@ struct HelpCenterView: View {
              "RoleLantern uses your location to show local roles, plus remote roles. Change the distance with \"Change\" at the top of the Jobs screen."),
             ("Where can I see what I applied to?",
              "My Jobs > Applied shows every application and its latest status."),
+            ("How do I clear roles I'm not interested in?",
+             "In My Jobs, swipe left on an application or invite. Removing an unanswered invite also tells the employer you're not interested. Removing an application only clears it from your list."),
             ("What is an invite to apply?",
              "An employer thinks you fit a role and invited you to apply. Accept or decline it in My Jobs > Invites. Your identity stays hidden until you accept."),
         ]),
@@ -45,7 +47,7 @@ struct HelpCenterView: View {
             ("Who can see my CV?",
              "Your CV stays private until you choose to apply. You control this in the Privacy Center."),
             ("How do I delete my account?",
-             "Menu > Settings > Delete my account. This permanently removes your account, CV, applications and messages."),
+             "Profile > Account settings > Delete my account. This permanently removes your account, CV, applications and messages."),
         ]),
         Topic(title: "Messages", icon: "envelope", items: [
             ("How do I delete a conversation?",

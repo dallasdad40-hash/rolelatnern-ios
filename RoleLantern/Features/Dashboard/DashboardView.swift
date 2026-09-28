@@ -8,9 +8,8 @@ struct DashboardView: View {
     @StateObject private var invitesVM = InvitesViewModel()
     // NavigationPath (not [DashRoute]) so job and invite details can be pushed too.
     @State private var path = NavigationPath()
-    @State private var applications: [ApplicationRecord] = []
-    @State private var jobTitles: [UUID: BoardJob] = [:]
-    @State private var savedCount = 0
+    /// Tracker count from the same source as the tracker screen (skips removed roles).
+    @State private var trackedCount = 0
     @State private var availability = "active"
     @State private var isLoading = true
     @State private var saveError: String?
@@ -30,7 +29,6 @@ struct DashboardView: View {
                     welcome
                     quickLinks
                     availabilityCard
-                    applicationsCard
                 }
                 .padding(20)
             }
@@ -54,6 +52,10 @@ struct DashboardView: View {
             }
             .onChange(of: router.pending) { _ in consumePending() }
             .onAppear { consumePending() }
+            // Back on the dashboard after using the tracker: refresh its count.
+            .onChange(of: path.count) { count in
+                if count == 0 { Task { await load() } }
+            }
             .refreshable {
                 await auth.loadOrCreateProfile()
                 await load()
@@ -91,7 +93,7 @@ struct DashboardView: View {
                       highlight: invitesVM.openCount > 0)
             Divider().padding(.leading, 48)
             quickLink(.applications, icon: "checklist", title: "Application tracker",
-                      detail: applications.isEmpty ? "No applications yet" : "\(applications.count) total",
+                      detail: trackedCount == 0 ? "No applications yet" : "\(trackedCount) total",
                       highlight: false)
             Divider().padding(.leading, 48)
             quickLink(.privacy, icon: "hand.raised", title: "Privacy Center",
@@ -184,56 +186,6 @@ struct DashboardView: View {
         .cornerRadius(14)
     }
 
-    private var applicationsCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Applications")
-                    .font(.headline)
-                    .foregroundColor(Brand.navy)
-                Spacer()
-                Text("\(savedCount) saved")
-                    .font(.caption)
-                    .foregroundColor(Brand.slate)
-            }
-
-            if isLoading {
-                ProgressView().frame(maxWidth: .infinity)
-            } else if applications.isEmpty {
-                Text("No applications yet. Roles you apply to will show up here with status updates.")
-                    .font(.subheadline)
-                    .foregroundColor(Brand.slate)
-            } else {
-                ForEach(applications.prefix(10)) { application in
-                    HStack(spacing: 10) {
-                        Image(systemName: application.applicationType == "platform_application"
-                              ? "paperplane.fill" : "arrow.up.right.square")
-                            .foregroundColor(Brand.teal)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(jobTitles[application.jobId]?.jobTitle ?? "Role")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundColor(Brand.navy)
-                                .lineLimit(1)
-                            Text(jobTitles[application.jobId]?.companyName ?? "")
-                                .font(.caption)
-                                .foregroundColor(Brand.slate)
-                        }
-                        Spacer()
-                        TagChip(text: statusLabel(application), color: Brand.gold)
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
-        }
-        .padding(16)
-        .background(Brand.surface.opacity(0.6))
-        .cornerRadius(14)
-    }
-
-    private func statusLabel(_ application: ApplicationRecord) -> String {
-        if application.applicationType == "external_click" { return "Viewed externally" }
-        return application.status.replacingOccurrences(of: "_", with: " ").capitalized
-    }
-
     private func load() async {
         guard let profile = auth.profile else {
             isLoading = false
@@ -242,10 +194,6 @@ struct DashboardView: View {
         isLoading = true
         defer { isLoading = false }
         availability = profile.activeStatus ?? "active"
-        applications = (try? await data.fetchApplications(candidateId: profile.id)) ?? []
-        savedCount = (try? await data.fetchSavedJobs(candidateId: profile.id).count) ?? 0
-        for application in applications.prefix(10) where jobTitles[application.jobId] == nil {
-            jobTitles[application.jobId] = try? await data.fetchJob(id: application.jobId)
-        }
+        trackedCount = (try? await CandidateAPI().applications().count) ?? 0
     }
 }

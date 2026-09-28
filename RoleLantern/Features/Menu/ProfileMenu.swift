@@ -8,11 +8,11 @@ struct ProfileMenuButton: View {
         Button {
             showMenu = true
         } label: {
-            Image(systemName: "person.crop.circle")
+            Image(systemName: "gearshape")
                 .font(.title3)
                 .foregroundColor(Brand.navy)
         }
-        .accessibilityLabel("Account menu")
+        .accessibilityLabel("Settings and menu")
         .sheet(isPresented: $showMenu) { ProfileMenuView() }
     }
 }

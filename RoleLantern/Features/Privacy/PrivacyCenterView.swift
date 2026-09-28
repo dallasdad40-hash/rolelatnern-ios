@@ -72,8 +72,25 @@ struct PrivacyCenterView: View {
         Form {
             Section {
                 Toggle("Employers can discover me", isOn: s.discoverable)
-                Toggle("Show my anonymous card in search", isOn: s.anonymousSearchOptin)
-                    .disabled(!s.wrappedValue.discoverable)
+                    .tint(.green)
+                    .onChange(of: s.wrappedValue.discoverable) { on in
+                        // The search card depends on being discoverable.
+                        if !on { s.wrappedValue.anonymousSearchOptin = false }
+                    }
+                Toggle(isOn: s.anonymousSearchOptin) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Show my anonymous card in search")
+                            .foregroundColor(s.wrappedValue.discoverable ? Brand.navy : Color.gray.opacity(0.55))
+                        if !s.wrappedValue.discoverable {
+                            Text("Turn on \"Employers can discover me\" first")
+                                .font(.caption)
+                                .foregroundColor(Color.gray.opacity(0.55))
+                        }
+                    }
+                }
+                .tint(.green)
+                .disabled(!s.wrappedValue.discoverable)
+                .opacity(s.wrappedValue.discoverable ? 1 : 0.6)
             } header: {
                 Text("Visibility")
             } footer: {

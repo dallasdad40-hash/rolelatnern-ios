@@ -11,10 +11,15 @@ struct JobDetailView: View {
     /// Full record incl. structured_facts and full description (list fetch is slim).
     @State private var hydratedJob: BoardJob?
     @State private var showExternalApply = false
+    /// Read-only view of the posting (does not count as applying).
+    @State private var showPosting = false
     @State private var showApplySheet = false
     @State private var statusMessage: String?
 
     private let data = DataService()
+
+    /// The full record once loaded (list rows are slim), else the row we were given.
+    private var full: BoardJob { hydratedJob ?? job }
 
     private var isApplied: Bool { jobsVM.appliedJobIds.contains(job.id) }
     private var isSaved: Bool { jobsVM.savedJobIds.contains(job.id) }
@@ -24,12 +29,15 @@ struct JobDetailView: View {
             VStack(alignment: .leading, spacing: 20) {
                 header
                 trustPanel
-                if let summary = job.summary, !summary.isEmpty {
+                if let summary = full.summary, !summary.isEmpty,
+                   !summary.trimmingCharacters(in: .whitespaces).hasPrefix("Summary prepared by RoleLantern") {
                     section("About this role") {
                         Text(summary).font(.subheadline).foregroundColor(Brand.navy)
                     }
                 }
+                jobFacts
                 requirements
+                fullPostingLink
                 evidenceMatch
             }
             .padding(20)
@@ -60,6 +68,11 @@ struct JobDetailView: View {
                 }
             }
         }) {
+            if let url = URL(string: job.applyUrl) {
+                SafariView(url: url).ignoresSafeArea()
+            }
+        }
+        .sheet(isPresented: $showPosting) {
             if let url = URL(string: job.applyUrl) {
                 SafariView(url: url).ignoresSafeArea()
             }
@@ -152,31 +165,31 @@ struct JobDetailView: View {
     private var requirements: some View {
         section("Key requirements") {
             VStack(alignment: .leading, spacing: 10) {
-                if let years = job.yearsExperienceMin {
+                if let years = full.yearsExperienceMin {
                     Label("\(years)+ years of experience", systemImage: "briefcase")
                 }
-                if let education = job.requiredEducation, !education.isEmpty {
+                if let education = full.requiredEducation, !education.isEmpty {
                     Label(education, systemImage: "graduationcap")
                 }
-                if let level = job.jobLevel, !level.isEmpty {
+                if let level = full.jobLevel, !level.isEmpty {
                     Label(level.capitalized, systemImage: "chart.bar")
                 }
-                if let must = job.mustHaveSkills, !must.isEmpty {
+                if let must = full.mustHaveSkills, !must.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Must-have skills").font(.caption.weight(.medium)).foregroundColor(Brand.slate)
                         FlowTags(tags: must, color: Brand.navy)
                     }
                 }
-                if let nice = job.niceToHaveSkills, !nice.isEmpty {
+                if let nice = full.niceToHaveSkills, !nice.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Nice to have").font(.caption.weight(.medium)).foregroundColor(Brand.slate)
                         FlowTags(tags: nice, color: Brand.slate)
                     }
                 }
-                if !job.therapeuticAreaTags.isEmpty {
+                if !full.therapeuticAreaTags.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Therapeutic areas").font(.caption.weight(.medium)).foregroundColor(Brand.slate)
-                        FlowTags(tags: job.therapeuticAreaTags, color: Brand.teal)
+                        FlowTags(tags: full.therapeuticAreaTags, color: Brand.teal)
                     }
                 }
             }
@@ -247,6 +260,54 @@ struct JobDetailView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
             .background(.regularMaterial)
+        }
+    }
+
+    /// Same highlights as the website: AI-extracted facts, never the copied posting text.
+    @ViewBuilder
+    private var jobFacts: some View {
+        let facts = full.structuredFacts
+        let lookingFor = (facts?.requirements ?? []).filter { !$0.isEmpty }
+        let youllDo = (facts?.responsibilities ?? []).filter { !$0.isEmpty }
+        let pay = (full.salaryMin == nil && full.salaryMax == nil) ? facts?.compensation : nil
+        if !lookingFor.isEmpty {
+            section("What they're looking for") { bullets(lookingFor) }
+        }
+        if !youllDo.isEmpty {
+            section("What you'll do") { bullets(youllDo) }
+        }
+        if let pay, !pay.isEmpty {
+            section("Compensation") {
+                Text(pay).font(.subheadline).foregroundColor(Brand.navy)
+            }
+        }
+    }
+
+    private func bullets(_ items: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                HStack(alignment: .top, spacing: 8) {
+                    Circle().fill(Brand.teal).frame(width: 5, height: 5).padding(.top, 7)
+                    Text(item)
+                        .font(.subheadline)
+                        .foregroundColor(Brand.navy)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    /// The complete posting lives on the employer's site; we can't copy it.
+    @ViewBuilder
+    private var fullPostingLink: some View {
+        if URL(string: job.applyUrl) != nil {
+            Button {
+                showPosting = true
+            } label: {
+                Label("Read the full description on the company site", systemImage: "doc.text.magnifyingglass")
+                    .font(.subheadline.weight(.medium))
+            }
+            .buttonStyle(SecondaryButtonStyle())
         }
     }
 

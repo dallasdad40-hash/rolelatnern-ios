@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Job alerts, stored and emailed by the website's alert engine.
 struct JobAlertsView: View {
+    @EnvironmentObject var auth: AuthViewModel
     @State private var alerts: [JobAlert] = []
     @State private var isLoading = true
     @State private var errorText: String?
@@ -59,7 +60,7 @@ struct JobAlertsView: View {
             }
         }
         .sheet(item: $matchesFor) { alert in
-            AlertMatchesView(alert: alert)
+            AlertMatchesView(alert: alert).environmentObject(auth)
         }
         .sheet(isPresented: $showCreate) {
             CreateAlertView { created in
@@ -342,44 +343,68 @@ struct CreateAlertView: View {
 }
 
 /// Jobs matching one alert today (same matching rules as the alert emails).
+/// Swipe a job away with Not interested; it's hidden here and on the job board.
 struct AlertMatchesView: View {
     let alert: JobAlert
+    @EnvironmentObject var auth: AuthViewModel
     @Environment(\.dismiss) private var dismiss
-    @State private var preview: AlertPreview?
+    @State private var items: [AlertPreview.Item] = []
+    @State private var total = 0
+    @State private var loaded = false
     @State private var errorText: String?
+    @State private var lastRemoved: (item: AlertPreview.Item, index: Int)?
+
+    private let data = DataService()
 
     var body: some View {
         NavigationStack {
             Group {
-                if let preview {
-                    if preview.count == 0 {
-                        EmptyStateView(title: "No matches today",
-                                       message: "We'll email you as soon as a matching job is posted.")
-                    } else {
-                        List {
-                            Section {
-                                ForEach(preview.top ?? []) { item in
-                                    NavigationLink {
-                                        JobDetailLoader(jobId: item.id)
-                                    } label: {
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(item.title ?? "Role").font(.subheadline.weight(.medium)).foregroundColor(Brand.navy)
-                                            Text([item.company, item.location].compactMap { $0 }.joined(separator: " · "))
-                                                .font(.caption).foregroundColor(Brand.slate)
-                                        }
+                if !loaded {
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let errorText {
+                    EmptyStateView(title: "Couldn't load matches", message: errorText)
+                } else if items.isEmpty {
+                    EmptyStateView(title: "No matches today",
+                                   message: "We'll email you as soon as a matching job is posted.")
+                } else {
+                    List {
+                        Section {
+                            ForEach(items) { item in
+                                NavigationLink {
+                                    JobDetailLoader(jobId: item.id)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(item.title ?? "Role").font(.subheadline.weight(.medium)).foregroundColor(Brand.navy)
+                                        Text([item.company, item.location].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                                            .font(.caption).foregroundColor(Brand.slate)
                                     }
                                 }
-                            } footer: {
-                                if preview.count > (preview.top?.count ?? 0) {
-                                    Text("Showing the newest \(preview.top?.count ?? 0) of \(preview.count) matches.")
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button {
+                                        Task { await notInterested(item) }
+                                    } label: {
+                                        Label("Not interested", systemImage: "hand.thumbsdown")
+                                    }
+                                    .tint(.red)
                                 }
+                            }
+                        } header: {
+                            Text(items.count == 1 ? "1 job" : "\(items.count) jobs")
+                        } footer: {
+                            if total > items.count + hiddenCount {
+                                Text("Showing the newest \(items.count) of \(total). Swipe left on a job to remove it.")
+                            } else {
+                                Text("Swipe left on a job to remove it.")
                             }
                         }
                     }
-                } else if let errorText {
-                    EmptyStateView(title: "Couldn't load matches", message: errorText)
-                } else {
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if lastRemoved != nil {
+                    UndoBar(text: "Job hidden",
+                            onUndo: { Task { await undo() } },
+                            onClose: { withAnimation { lastRemoved = nil } })
                 }
             }
             .navigationTitle(alert.name)
@@ -387,10 +412,50 @@ struct AlertMatchesView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
-            .task {
-                do { preview = try await MobileAPI().previewAlert(alert.triggers) }
-                catch { errorText = error.localizedDescription }
-            }
+            .task { await load() }
         }
+    }
+
+    @State private var hiddenCount = 0
+
+    private func load() async {
+        defer { loaded = true }
+        do {
+            let preview = try await MobileAPI().previewAlert(alert.triggers, limit: 100)
+            var dismissed = Set<UUID>()
+            if let id = auth.profile?.id { dismissed = (try? await data.fetchDismissedJobIds(candidateId: id)) ?? [] }
+            let all = preview.top ?? []
+            items = all.filter { !dismissed.contains($0.id) }
+            hiddenCount = all.count - items.count
+            total = preview.count
+        } catch {
+            errorText = error.localizedDescription
+        }
+    }
+
+    private func notInterested(_ item: AlertPreview.Item) async {
+        guard let candidateId = auth.profile?.id, let index = items.firstIndex(where: { $0.id == item.id }) else { return }
+        withAnimation { _ = items.remove(at: index) }
+        lastRemoved = (item, index)
+        do {
+            try await data.dismissJob(candidateId: candidateId, jobId: item.id)
+        } catch {
+            withAnimation { items.insert(item, at: min(index, items.count)) }
+            lastRemoved = nil
+            return
+        }
+        let removedId = item.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+            if lastRemoved?.item.id == removedId { withAnimation { lastRemoved = nil } }
+        }
+    }
+
+    private func undo() async {
+        guard let removed = lastRemoved, let candidateId = auth.profile?.id else { return }
+        withAnimation {
+            items.insert(removed.item, at: min(removed.index, items.count))
+            lastRemoved = nil
+        }
+        try? await data.undismissJob(candidateId: candidateId, jobId: removed.item.id)
     }
 }

@@ -344,8 +344,8 @@ extension MobileAPI {
         let _: Empty = try await request("DELETE", "alerts/\(id.uuidString.lowercased())")
     }
 
-    func previewAlert(_ t: JobAlertTriggers) async throws -> AlertPreview {
-        var q: [URLQueryItem] = []
+    func previewAlert(_ t: JobAlertTriggers, limit: Int = 5) async throws -> AlertPreview {
+        var q: [URLQueryItem] = [URLQueryItem(name: "limit", value: String(limit))]
         func add(_ k: String, _ v: [String]) { if !v.isEmpty { q.append(URLQueryItem(name: k, value: v.joined(separator: ","))) } }
         add("keywords", t.keywords)
         add("functions", t.functions)

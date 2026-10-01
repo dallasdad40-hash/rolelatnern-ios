@@ -7,6 +7,7 @@ struct JobAlertsView: View {
     @State private var errorText: String?
     @State private var showCreate = false
     @State private var pendingDelete: JobAlert?
+    @State private var matchesFor: JobAlert?
 
     private let api = MobileAPI()
     static let frequencies = ["Instant", "Daily", "Weekly"]
@@ -29,11 +30,17 @@ struct JobAlertsView: View {
                 }
             } else {
                 List {
+                    Section {
+                        Text("We email you new matching jobs at the frequency you pick. Tap See matching jobs to view today's matches here.")
+                            .font(.caption)
+                            .foregroundColor(Brand.slate)
+                    }
                     ForEach(alerts) { alert in
                         AlertRow(
                             alert: alert,
                             onToggle: { on in Task { await setStatus(alert, active: on) } },
-                            onFrequency: { f in Task { await setFrequency(alert, f) } }
+                            onFrequency: { f in Task { await setFrequency(alert, f) } },
+                            onShowMatches: { matchesFor = alert }
                         )
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button { pendingDelete = alert } label: { Label("Delete", systemImage: "trash") }
@@ -50,6 +57,9 @@ struct JobAlertsView: View {
                 Button { showCreate = true } label: { Image(systemName: "plus") }
                     .accessibilityLabel("New job alert")
             }
+        }
+        .sheet(item: $matchesFor) { alert in
+            AlertMatchesView(alert: alert)
         }
         .sheet(isPresented: $showCreate) {
             CreateAlertView { created in
@@ -105,6 +115,7 @@ private struct AlertRow: View {
     let alert: JobAlert
     let onToggle: (Bool) -> Void
     let onFrequency: (String) -> Void
+    var onShowMatches: () -> Void = {}
 
     private var summary: String {
         let t = alert.triggers
@@ -132,13 +143,17 @@ private struct AlertRow: View {
                         }
                     }
                 } label: {
-                    Label(alert.frequency == "Paused" ? "Paused" : alert.frequency, systemImage: "envelope")
+                    Label("Email: " + (alert.frequency == "Paused" ? "Paused" : alert.frequency), systemImage: "envelope")
                         .font(.caption.weight(.medium))
                 }
+                .buttonStyle(.borderless)
                 Spacer()
-                if let n = alert.last_match_count, n > 0 {
-                    Text("\(n) matching roles").font(.caption).foregroundColor(Brand.teal)
+                Button(action: onShowMatches) {
+                    Label("See matching jobs", systemImage: "list.bullet")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(Brand.teal)
                 }
+                .buttonStyle(.borderless)
             }
         }
         .padding(.vertical, 4)
@@ -233,7 +248,11 @@ struct CreateAlertView: View {
                     Picker("Work setting", selection: $work) {
                         ForEach(AlertCategories.work, id: \.value) { Text($0.label).tag($0.value) }
                     }
-                } header: { Text("Where") }
+                } header: { Text("Where") } footer: {
+                    Text(work == "remote" && !list(states).isEmpty
+                         ? "Jobs in \(list(states).joined(separator: ", ").uppercased()) or remote anywhere."
+                         : "Pick Remote and add states to get jobs in those states or remote anywhere.")
+                }
 
                 Section {
                     Picker("Email me", selection: $frequency) {
@@ -242,23 +261,34 @@ struct CreateAlertView: View {
                 }
 
                 Section {
-                    Button {
-                        Task { await runPreview() }
-                    } label: {
-                        HStack {
-                            Text("See how many roles match today")
-                            Spacer()
-                            if previewing { ProgressView() }
-                            else if let preview { Text("\(preview.count)").fontWeight(.semibold).foregroundColor(Brand.teal) }
+                    HStack {
+                        if previewing {
+                            ProgressView()
+                            Text("Checking today's jobs...").foregroundColor(Brand.slate)
+                        } else if let preview {
+                            Image(systemName: preview.count > 0 ? "checkmark.circle.fill" : "exclamationmark.circle")
+                                .foregroundColor(preview.count > 0 ? Brand.teal : .orange)
+                            Text(preview.count == 1 ? "1 job matches today" : "\(preview.count) jobs match today")
+                                .fontWeight(.semibold)
+                                .foregroundColor(Brand.navy)
+                        } else {
+                            Text(triggers.hasCriteria ? "Checking..." : "Add a keyword, category, state or Remote to see matches.")
+                                .font(.subheadline)
+                                .foregroundColor(Brand.slate)
                         }
                     }
-                    .disabled(!triggers.hasCriteria || previewing)
                     ForEach(preview?.top ?? []) { item in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.title ?? "Role").font(.subheadline).foregroundColor(Brand.navy)
                             Text([item.company, item.location].compactMap { $0 }.joined(separator: " · "))
                                 .font(.caption).foregroundColor(Brand.slate)
                         }
+                    }
+                } header: {
+                    Text("Matches today")
+                } footer: {
+                    if preview?.count == 0 {
+                        Text("Keywords match job titles. Try a broader keyword, or fewer filters. You can still save it and we'll email you when one is posted.")
                     }
                 }
             }
@@ -272,7 +302,14 @@ struct CreateAlertView: View {
                     }
                 }
             }
-            .onChange(of: triggers) { _ in preview = nil }
+            .task(id: triggers) {
+                // Live preview, half a second after the last change.
+                preview = nil
+                guard triggers.hasCriteria else { return }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                if Task.isCancelled { return }
+                await runPreview()
+            }
             .alert("Job alert", isPresented: .init(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(errorText ?? "") }
@@ -282,7 +319,8 @@ struct CreateAlertView: View {
     private func runPreview() async {
         previewing = true
         defer { previewing = false }
-        do { preview = try await api.previewAlert(triggers) } catch { errorText = error.localizedDescription }
+        let t = triggers
+        if let p = try? await api.previewAlert(t), t == triggers { preview = p }
     }
 
     private func save() async {
@@ -299,6 +337,60 @@ struct CreateAlertView: View {
             dismiss()
         } catch {
             errorText = error.localizedDescription
+        }
+    }
+}
+
+/// Jobs matching one alert today (same matching rules as the alert emails).
+struct AlertMatchesView: View {
+    let alert: JobAlert
+    @Environment(\.dismiss) private var dismiss
+    @State private var preview: AlertPreview?
+    @State private var errorText: String?
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let preview {
+                    if preview.count == 0 {
+                        EmptyStateView(title: "No matches today",
+                                       message: "We'll email you as soon as a matching job is posted.")
+                    } else {
+                        List {
+                            Section {
+                                ForEach(preview.top ?? []) { item in
+                                    NavigationLink {
+                                        JobDetailLoader(jobId: item.id)
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(item.title ?? "Role").font(.subheadline.weight(.medium)).foregroundColor(Brand.navy)
+                                            Text([item.company, item.location].compactMap { $0 }.joined(separator: " · "))
+                                                .font(.caption).foregroundColor(Brand.slate)
+                                        }
+                                    }
+                                }
+                            } footer: {
+                                if preview.count > (preview.top?.count ?? 0) {
+                                    Text("Showing the newest \(preview.top?.count ?? 0) of \(preview.count) matches.")
+                                }
+                            }
+                        }
+                    }
+                } else if let errorText {
+                    EmptyStateView(title: "Couldn't load matches", message: errorText)
+                } else {
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .navigationTitle(alert.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+            .task {
+                do { preview = try await MobileAPI().previewAlert(alert.triggers) }
+                catch { errorText = error.localizedDescription }
+            }
         }
     }
 }

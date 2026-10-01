@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// Native Privacy Center. Same settings as the web Privacy Center (they share
-/// one record), so a change here shows up on the website and vice versa.
+/// Native Privacy Center. Visibility and contact settings go through the website's
+/// mobile API (the same fields the website enforces); the firewall table is shared.
 struct PrivacyCenterView: View {
-    @State private var settings: PrivacySettings?
-    @State private var saved: PrivacySettings?
+    /// Website-enforced settings (candidate_profiles), via the mobile API.
+    @State private var web: MobilePrivacy?
+    @State private var loaded = false
     @State private var blocked: [BlockedEmployer] = []
     @State private var audit: [PrivacyAuditEntry] = []
     @State private var isLoading = true
@@ -41,20 +42,29 @@ struct PrivacyCenterView: View {
     @Environment(\.openURL) private var openURL
 
     private let api = CandidateAPI()
+    private let mobile = MobileAPI()
 
-    private let salaryOptions: [(String, String)] = [
-        ("private", "Private"),
-        ("private_match_only", "Only for matching"),
-        ("anonymous_aggregate", "Anonymous statistics"),
-        ("share_after_apply", "Share after I apply"),
-        ("share_with_approved_employers", "Share with approved employers"),
+    /// The two choices the website offers, in the same words.
+    private let visibilityChoices: [(value: String, title: String, detail: String)] = [
+        ("anonymous_to_employers", "Verified employers, anonymously",
+         "Verified employers can find an anonymous card with your skills and experience. No name, contact details, or CV."),
+        ("private", "No one, keep me private",
+         "Employers can't find you. You can still search and apply for jobs."),
     ]
+
+    private func visibilityLabel(_ value: String) -> String {
+        switch value {
+        case "job_alerts_only": return "Job alerts only"
+        case "visible_to_approved_employers": return "Approved employers"
+        default: return visibilityChoices.first { $0.value == value }?.title ?? value
+        }
+    }
 
     var body: some View {
         Group {
-            if let binding = Binding($settings) {
-                form(binding)
-            } else if isLoading {
+            if let current = web {
+                form(current)
+            } else if isLoading && !loaded {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 EmptyStateView(title: "Privacy Center unavailable", message: "Pull down to try again.")
@@ -93,69 +103,70 @@ struct PrivacyCenterView: View {
     }
 
     @ViewBuilder
-    private func form(_ s: Binding<PrivacySettings>) -> some View {
+    private func form(_ current: MobilePrivacy) -> some View {
         Form {
             Section {
-                Toggle("Employers can discover me", isOn: s.discoverable)
-                    .tint(.green)
-                    .onChange(of: s.wrappedValue.discoverable) { on in
-                        // The search card depends on being discoverable.
-                        if !on { s.wrappedValue.anonymousSearchOptin = false }
-                    }
-                    .onChange(of: s.wrappedValue.anonymousSearchOptin) { on in
-                        // An anonymous card must never show contact details.
-                        if on { s.wrappedValue.redactContactDetails = true }
-                    }
-                Toggle(isOn: s.anonymousSearchOptin) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Show my anonymous card in search")
-                            .foregroundColor(s.wrappedValue.discoverable ? Brand.navy : Color.gray.opacity(0.55))
-                        if !s.wrappedValue.discoverable {
-                            Text("Turn on \"Employers can discover me\" first")
-                                .font(.caption)
-                                .foregroundColor(Color.gray.opacity(0.55))
+                ForEach(visibilityChoices, id: \.value) { choice in
+                    Button {
+                        Task { await setVisibility(choice.value) }
+                    } label: {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: current.profileVisibility == choice.value ? "largecircle.fill.circle" : "circle")
+                                .font(.title3)
+                                .foregroundColor(current.profileVisibility == choice.value ? .green : Color.gray.opacity(0.6))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(choice.title).foregroundColor(Brand.navy)
+                                Text(choice.detail)
+                                    .font(.caption)
+                                    .foregroundColor(Brand.slate)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: 0)
                         }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .disabled(saving)
                 }
-                .tint(.green)
-                .disabled(!s.wrappedValue.discoverable)
-                .opacity(s.wrappedValue.discoverable ? 1 : 0.6)
+                if !visibilityChoices.contains(where: { $0.value == current.profileVisibility }) {
+                    Label("Currently: \(visibilityLabel(current.profileVisibility)) (set on the website)", systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundColor(Brand.slate)
+                }
             } header: {
-                Text("Visibility")
+                HStack {
+                    Text("Who can find me")
+                    if saving { Spacer(); ProgressView() }
+                }
             } footer: {
-                Text("Even when discoverable, employers only see an anonymous card. Your name and CV stay hidden until you accept an invite or apply.")
+                Text("This is the same setting as on rolelantern.com. Your name and CV stay hidden until you accept an invite or apply.")
             }
 
             Section {
-                ProtectionToggle(
-                    title: "Lock my CV",
-                    detail: "Employers can't open your CV until you apply or accept an invite.",
-                    isOn: s.cvLocked
-                )
-                ProtectionToggle(
-                    title: "Hide my contact details",
-                    detail: s.wrappedValue.anonymousSearchOptin
-                        ? "Required while your anonymous card is visible."
-                        : "Your email and phone never show on your profile.",
-                    isOn: s.redactContactDetails,
-                    locked: s.wrappedValue.anonymousSearchOptin
-                )
-                ProtectionToggle(
-                    title: "Hide my current employer",
-                    detail: "Other companies won't see where you work now. Your firewall already stops your current employer from seeing you at all.",
-                    isOn: s.redactCurrentEmployer
-                )
-                Picker("Reveal my identity", selection: s.identityRevealPolicy) {
-                    Text("Only when I approve").tag("manual")
-                    Text("When I accept an invite").tag("on_accept")
-                }
+                Toggle("Email me job alerts", isOn: Binding(
+                    get: { current.jobAlertsEnabled ?? false },
+                    set: { on in Task { await patch(.init(jobAlertsEnabled: on)) } }
+                ))
+                .tint(.green)
+                Toggle("Recruitment agencies can contact me", isOn: Binding(
+                    get: { current.agencyOutreachOptIn ?? false },
+                    set: { on in Task { await patch(.init(agencyOutreachOptIn: on)) } }
+                ))
+                .tint(.green)
             } header: {
-                Text("Your protections")
+                Text("Contact")
             }
 
             Section {
-                Toggle("Also block parent and sister companies", isOn: s.autoProtectParentSubsidiaries)
-                    .tint(.green)
+                ProtectionRow(title: "Your CV is locked", detail: "Employers can't open your CV until you apply, or accept an invite and choose to share it.")
+                ProtectionRow(title: "Contact details hidden", detail: "Your email and phone are never shown on your anonymous card.")
+                ProtectionRow(title: "Current employer hidden", detail: "Companies don't see where you work now. Your firewall stops blocked employers from seeing you at all.")
+                ProtectionRow(title: "You decide what's shared", detail: "Accepting an invite shares your name, email and LinkedIn. Your CV is only shared if you tick the box.")
+            } header: {
+                Text("Always on")
+            }
+
+            Section {
                 ForEach(blocked) { employer in
                     HStack {
                         Label(employer.companyNameRaw ?? "Employer", systemImage: "shield.lefthalf.filled")
@@ -179,18 +190,6 @@ struct PrivacyCenterView: View {
                 Text("Employer firewall")
             } footer: {
                 Text("Blocked employers can never see, find, or contact you. This overrides every other setting.")
-            }
-
-            if s.wrappedValue != saved {
-                Section {
-                    Button {
-                        Task { await save() }
-                    } label: {
-                        if saving { ProgressView() } else { Text("Save changes") }
-                    }
-                    .disabled(saving)
-                    Button("Discard", role: .destructive) { settings = saved }
-                }
             }
 
             if !visibleAudit.isEmpty {
@@ -236,27 +235,32 @@ struct PrivacyCenterView: View {
 
     private func load() async {
         isLoading = true
-        defer { isLoading = false }
+        defer { isLoading = false; loaded = true }
         do {
-            let data = try await api.privacy()
-            settings = data.settings
-            saved = data.settings
-            blocked = data.blockedEmployers
-            audit = data.audit
+            web = try await mobile.privacy()
         } catch {
             errorText = error.localizedDescription
         }
+        // Firewall list and activity log (shared tables).
+        if let data = try? await api.privacy() {
+            blocked = data.blockedEmployers
+            audit = data.audit
+        }
     }
 
-    private func save() async {
-        guard let settings else { return }
+    private func setVisibility(_ value: String) async {
+        guard web?.profileVisibility != value else { return }
+        await patch(.init(profileVisibility: value))
+    }
+
+    private func patch(_ change: MobileAPI.PrivacyPatch) async {
         saving = true
         defer { saving = false }
         do {
-            try await api.updatePrivacy(settings)
-            await load()
+            web = try await mobile.updatePrivacy(change)
         } catch {
             errorText = error.localizedDescription
+            await load()
         }
     }
 
@@ -266,7 +270,7 @@ struct PrivacyCenterView: View {
         guard !name.isEmpty else { return }
         do {
             try await api.blockEmployer(named: name)
-            await reloadKeepingEdits()
+            await load()
         } catch {
             errorText = error.localizedDescription
         }
@@ -275,44 +279,31 @@ struct PrivacyCenterView: View {
     private func remove(_ items: [BlockedEmployer]) async {
         do {
             for item in items { try await api.unblock(item) }
-            await reloadKeepingEdits()
+            await load()
         } catch {
             errorText = error.localizedDescription
         }
     }
 
-    /// Refresh the firewall list without throwing away unsaved toggle edits.
-    private func reloadKeepingEdits() async {
-        let pending = settings
-        let hadEdits = settings != saved
-        await load()
-        if hadEdits { settings = pending }
-    }
 }
 
-/// A protection switch with a one-line explanation; can be locked on.
-private struct ProtectionToggle: View {
+/// An always-on protection with a one-line explanation.
+private struct ProtectionRow: View {
     let title: String
     let detail: String
-    @Binding var isOn: Bool
-    var locked = false
 
     var body: some View {
-        Toggle(isOn: $isOn) {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "checkmark.shield.fill")
+                .foregroundColor(.green)
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(title).foregroundColor(Brand.navy)
-                    if locked {
-                        Image(systemName: "lock.fill").font(.caption).foregroundColor(Brand.slate)
-                    }
-                }
+                Text(title).foregroundColor(Brand.navy)
                 Text(detail)
                     .font(.caption)
                     .foregroundColor(Brand.slate)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .tint(.green)
-        .disabled(locked)
+        .padding(.vertical, 2)
     }
 }

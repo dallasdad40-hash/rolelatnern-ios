@@ -34,6 +34,18 @@ final class AuthViewModel: ObservableObject {
     private let client = Supa.client
     private let data = DataService()
     private var currentNonce: String?
+    private var apiObservers: [NSObjectProtocol] = []
+
+    init() {
+        // The website API refuses aal1 tokens on two-step accounts: show the code screen.
+        apiObservers.append(NotificationCenter.default.addObserver(
+            forName: .mobileAPIMFARequired, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                if self?.phase == .signedIn { self?.phase = .mfaChallenge }
+            }
+        })
+    }
 
     var userId: UUID? { client.auth.currentUser?.id }
     var userEmail: String? { client.auth.currentUser?.email }

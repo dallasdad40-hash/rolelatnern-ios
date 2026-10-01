@@ -120,6 +120,9 @@ final class JobsViewModel: ObservableObject {
     func load() async {
         isLoading = true
         defer { isLoading = false }
+        // Like the website: unless a country is picked, stay in the user's own country,
+        // so remote roles from other countries don't fill the board.
+        let country = self.country ?? locationService.boardCountry
         do {
             let lat = nearMe ? locationService.latitude : nil
             let lng = nearMe ? locationService.longitude : nil

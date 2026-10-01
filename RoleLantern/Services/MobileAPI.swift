@@ -212,3 +212,67 @@ extension MobileAPI {
         }
     }
 }
+
+// MARK: - Profile (same fields and validation as the website)
+
+struct MobileProfile: Decodable {
+    var anonymousDisplayId: String?
+    var email: String?
+    var fullName: String?
+    var currentTitle: String?
+    var seniorityLevel: String?
+    var yearsExperience: Double?
+    var desiredLocation: String?
+    var remotePreference: String?
+    var linkedinUrl: String?
+    var currentCompanyActual: String?
+    var contactPhone: String?
+    var activeCv: ActiveCV?
+    var strength: Strength?
+    var options: Options?
+
+    struct ActiveCV: Decodable { let id: UUID; let fileName: String? }
+    struct Strength: Decodable { let percent: Int; let missing: [String] }
+    struct Options: Decodable { let seniorityLevel: [String]?; let remotePreference: [String]? }
+}
+
+extension MobileAPI {
+    func profile() async throws -> MobileProfile {
+        try await request("GET", "profile")
+    }
+
+    struct ProfilePatch: Encodable {
+        var fullName: String
+        var currentTitle: String
+        var seniorityLevel: String
+        var yearsExperience: Double?
+        var desiredLocation: String
+        var remotePreference: String
+        var linkedinUrl: String
+        var currentCompanyActual: String
+        var contactPhone: String
+
+        enum CodingKeys: String, CodingKey {
+            case fullName, currentTitle, seniorityLevel, yearsExperience, desiredLocation
+            case remotePreference, linkedinUrl, currentCompanyActual, contactPhone
+        }
+
+        // Send yearsExperience as null when cleared, so the website clears it too.
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(fullName, forKey: .fullName)
+            try c.encode(currentTitle, forKey: .currentTitle)
+            try c.encode(seniorityLevel, forKey: .seniorityLevel)
+            try c.encode(yearsExperience, forKey: .yearsExperience)
+            try c.encode(desiredLocation, forKey: .desiredLocation)
+            try c.encode(remotePreference, forKey: .remotePreference)
+            try c.encode(linkedinUrl, forKey: .linkedinUrl)
+            try c.encode(currentCompanyActual, forKey: .currentCompanyActual)
+            try c.encode(contactPhone, forKey: .contactPhone)
+        }
+    }
+
+    func updateProfile(_ patch: ProfilePatch) async throws -> MobileProfile {
+        try await request("PATCH", "profile", body: patch)
+    }
+}

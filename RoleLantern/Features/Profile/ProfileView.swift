@@ -4,6 +4,7 @@ import SwiftUI
 struct ProfileView: View {
     @EnvironmentObject var auth: AuthViewModel
     @State private var showReview = false
+    @State private var details: MobileProfile?
 
     var body: some View {
         NavigationStack {
@@ -21,7 +22,11 @@ struct ProfileView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { ProfileMenuButton() }
             }
-            .refreshable { await auth.loadOrCreateProfile() }
+            .refreshable {
+                await auth.loadOrCreateProfile()
+                await loadDetails()
+            }
+            .task { await loadDetails() }
         }
     }
 
@@ -29,10 +34,13 @@ struct ProfileView: View {
         HStack(spacing: 14) {
             LanternMark(size: 56)
             VStack(alignment: .leading, spacing: 4) {
-                Text(auth.userEmail ?? "Your profile")
+                Text(details?.fullName?.isEmpty == false ? details!.fullName! : (auth.userEmail ?? "Your profile"))
                     .font(.headline)
                     .foregroundColor(Brand.navy)
                     .lineLimit(1)
+                if let title = details?.currentTitle, !title.isEmpty {
+                    Text(title).font(.subheadline).foregroundColor(Brand.slate).lineLimit(1)
+                }
                 if let anonId = auth.profile?.anonymousDisplayId {
                     Label("Employers see you as \(anonId)", systemImage: "theatermasks")
                         .font(.caption)
@@ -48,6 +56,13 @@ struct ProfileView: View {
 
     private var links: some View {
         VStack(spacing: 0) {
+            NavigationLink {
+                EditProfileView { details = $0 }
+            } label: {
+                row("Your details", icon: "person.text.rectangle",
+                    badge: details?.strength.flatMap { $0.percent < 100 ? "\($0.percent)% complete" : nil })
+            }
+            Divider().padding(.leading, 48)
             NavigationLink {
                 PrivacyCenterView()
             } label: {
@@ -65,11 +80,18 @@ struct ProfileView: View {
         .cornerRadius(16)
     }
 
-    private func row(_ title: String, icon: String) -> some View {
+    private func loadDetails() async {
+        if let p = try? await MobileAPI().profile() { details = p }
+    }
+
+    private func row(_ title: String, icon: String, badge: String? = nil) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon).foregroundColor(Brand.teal).frame(width: 24)
             Text(title).font(.subheadline.weight(.medium)).foregroundColor(Brand.navy)
             Spacer()
+            if let badge {
+                Text(badge).font(.caption.weight(.semibold)).foregroundColor(Brand.teal)
+            }
             Image(systemName: "chevron.right").font(.caption).foregroundColor(Brand.slate)
         }
         .padding(.horizontal, 12)

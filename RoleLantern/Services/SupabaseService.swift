@@ -267,35 +267,11 @@ struct DataService {
         return rows.first
     }
 
-    func uploadCV(candidateId: UUID, userId: UUID, data: Data, fileName: String, contentType: String) async throws -> CVFile {
-        let ext = (fileName as NSString).pathExtension.lowercased()
-        // Storage policy compares the folder to auth.uid() (lowercase), so the
-        // folder must be lowercase; Swift's uuidString is uppercase.
-        let path = "\(userId.uuidString.lowercased())/\(UUID().uuidString.lowercased()).\(ext.isEmpty ? "pdf" : ext)"
-
-        try await client.storage.from(AppConfig.cvBucket)
-            .upload(path, data: data, options: FileOptions(contentType: contentType))
-
-        struct NewCV: Encodable {
-            let candidate_id: UUID
-            let file_url: String
-            let file_name: String
-            let file_type: String
-            let parsed_status: String
-            let is_active: Bool
-        }
-        let cv: CVFile = try await client.from("cv_files")
-            .insert(NewCV(candidate_id: candidateId, file_url: path, file_name: fileName,
-                          file_type: contentType, parsed_status: "pending", is_active: true))
-            .select("id,candidate_id,file_url,file_name,file_type,parsed_status,uploaded_at,deleted_at,is_active")
-            .single()
-            .execute()
-            .value
-
-        // Trigger server-side parse on the existing web backend (keeps encryption in one place).
-        // Failure is non-fatal: the web app can parse later.
-        try? await callAuthenticatedEndpoint(AppConfig.cvParseEndpoint, body: ["cv_file_id": cv.id.uuidString])
-        return cv
+    /// Uploads through the website's pipeline (same checks, virus scan and parsing as the web),
+    /// then returns the new active CV.
+    func uploadCV(candidateId: UUID, data: Data, fileName: String, contentType: String) async throws -> (CVFile?, String?) {
+        let result = try await MobileAPI().uploadCV(data: data, fileName: fileName, mimeType: contentType)
+        return (try await fetchActiveCV(candidateId: candidateId), result.parseError)
     }
 
     func signedCVURL(path: String) async throws -> URL {

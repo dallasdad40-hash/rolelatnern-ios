@@ -18,7 +18,7 @@ struct CVCard: View {
         cvCard
             .fileImporter(
                 isPresented: $showImporter,
-                allowedContentTypes: [.pdf, UTType(filenameExtension: "docx") ?? .data],
+                allowedContentTypes: [.pdf, UTType(filenameExtension: "docx") ?? .data, .plainText],
                 allowsMultipleSelection: false
             ) { result in
                 Task { await handleImport(result) }
@@ -149,7 +149,7 @@ struct CVCard: View {
 
     private func handleImport(_ result: Result<[URL], Error>) async {
         guard case .success(let urls) = result, let url = urls.first,
-              let profile = auth.profile, let userId = auth.userId else { return }
+              let profile = auth.profile else { return }
         uploadBusy = true
         defer { uploadBusy = false }
 
@@ -162,16 +162,20 @@ struct CVCard: View {
                 statusMessage = "CVs must be 10 MB or smaller."
                 return
             }
-            let contentType = url.pathExtension.lowercased() == "pdf"
-                ? "application/pdf"
-                : "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            cv = try await data.uploadCV(
-                candidateId: profile.id, userId: userId,
+            guard let contentType = MobileAPI.cvMimeType(for: url.lastPathComponent) else {
+                statusMessage = "Please choose a PDF, Word (.docx) or text file."
+                return
+            }
+            let (newCV, parseError) = try await data.uploadCV(
+                candidateId: profile.id,
                 data: fileData, fileName: url.lastPathComponent, contentType: contentType
             )
-            statusMessage = "CV uploaded. Parsing runs in the background."
+            cv = newCV
+            statusMessage = parseError == nil
+                ? "CV uploaded. It's now your active CV."
+                : "CV uploaded, but we couldn't read all of it. Try a PDF if your matches look off."
         } catch {
-            statusMessage = "Upload failed: \(error.localizedDescription)"
+            statusMessage = error.localizedDescription
         }
     }
 

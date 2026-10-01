@@ -171,3 +171,44 @@ extension MobileAPI {
         let _: Empty = try await request("POST", "invites/\(id.uuidString.lowercased())/revoke")
     }
 }
+
+// MARK: - CV upload (website pipeline: type check, virus scan, parse)
+
+extension MobileAPI {
+    struct CVUploadTarget: Decodable {
+        let path: String
+        let token: String
+        let bucket: String?
+        let uploadUrl: String?
+    }
+
+    struct CVFinalizeResult: Decodable {
+        let cvFileId: UUID?
+        let fileName: String?
+        let parseError: String?
+    }
+
+    /// 1) ask the website for a one-time upload slot, 2) send the file straight to
+    /// storage, 3) ask the website to check, scan, parse and activate it.
+    func uploadCV(data: Data, fileName: String, mimeType: String) async throws -> CVFinalizeResult {
+        struct TargetBody: Encodable { let fileName: String; let size: Int; let mimeType: String }
+        let target: CVUploadTarget = try await request(
+            "POST", "cv/upload-target",
+            body: TargetBody(fileName: fileName, size: data.count, mimeType: mimeType)
+        )
+        _ = try await Supa.client.storage.from(target.bucket ?? AppConfig.cvBucket)
+            .uploadToSignedURL(target.path, token: target.token, data: data,
+                               options: FileOptions(contentType: mimeType))
+        struct FinalizeBody: Encodable { let path: String; let fileName: String }
+        return try await request("POST", "cv/finalize", body: FinalizeBody(path: target.path, fileName: fileName))
+    }
+
+    static func cvMimeType(for fileName: String) -> String? {
+        switch (fileName as NSString).pathExtension.lowercased() {
+        case "pdf": return "application/pdf"
+        case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        case "txt": return "text/plain"
+        default: return nil
+        }
+    }
+}

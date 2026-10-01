@@ -356,3 +356,32 @@ extension MobileAPI {
         return try await request("GET", "alerts/preview", query: q)
     }
 }
+
+// MARK: - Applications
+
+extension MobileAPI {
+    /// Withdraws a RoleLantern application: the employer no longer has it.
+    func withdrawApplication(_ id: UUID) async throws {
+        let _: Empty = try await request("DELETE", "applications/\(id.uuidString.lowercased())")
+    }
+}
+
+// MARK: - Account and push
+
+extension MobileAPI {
+    /// Apple-required account deletion, using the website's own deletion routine.
+    func deleteAccount() async throws {
+        struct B: Encodable { let confirm = "DELETE" }
+        let _: Empty = try await request("DELETE", "account", body: B())
+    }
+
+    func registerPushToken(_ token: String, environment: String) async throws {
+        struct B: Encodable { let token: String; let platform = "ios"; let environment: String }
+        let _: Empty = try await request("POST", "push-token", body: B(token: token, environment: environment))
+    }
+
+    func removePushToken(_ token: String) async throws {
+        struct B: Encodable { let token: String }
+        let _: Empty = try await request("DELETE", "push-token", body: B(token: token))
+    }
+}

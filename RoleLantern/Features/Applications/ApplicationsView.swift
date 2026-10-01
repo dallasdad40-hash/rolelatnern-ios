@@ -10,6 +10,7 @@ struct ApplicationsView: View {
     @State private var isLoading = true
     @State private var errorText: String?
     @State private var filter: Filter = .all
+    @State private var pendingWithdraw: TrackedApplication?
 
     private let api = CandidateAPI()
 
@@ -60,6 +61,14 @@ struct ApplicationsView: View {
                                 Label("Remove", systemImage: "trash")
                             }
                             .tint(.red)
+                            if app.isPlatform && app.status != "withdrawn" {
+                                Button {
+                                    pendingWithdraw = app
+                                } label: {
+                                    Label("Withdraw", systemImage: "arrow.uturn.backward")
+                                }
+                                .tint(.orange)
+                            }
                         }
                     }
                 }
@@ -77,7 +86,20 @@ struct ApplicationsView: View {
         }
         .refreshable { await load() }
         .task { await load() }
-        .alert("Couldn't load applications", isPresented: .init(
+        .confirmationDialog(
+            "Withdraw your application for \(pendingWithdraw?.jobTitle ?? "this role")?",
+            isPresented: .init(get: { pendingWithdraw != nil }, set: { if !$0 { pendingWithdraw = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Withdraw application", role: .destructive) {
+                if let app = pendingWithdraw { Task { await withdraw(app) } }
+                pendingWithdraw = nil
+            }
+            Button("Cancel", role: .cancel) { pendingWithdraw = nil }
+        } message: {
+            Text("\(pendingWithdraw?.companyName ?? "The employer") will no longer see your application. To only tidy your list, use Remove instead.")
+        }
+        .alert("Applications", isPresented: .init(
             get: { errorText != nil }, set: { if !$0 { errorText = nil } }
         )) {
             Button("OK", role: .cancel) {}
@@ -101,6 +123,16 @@ struct ApplicationsView: View {
         let removedId = app.id
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
             if recentlyRemoved?.id == removedId { withAnimation { recentlyRemoved = nil } }
+        }
+    }
+
+    private func withdraw(_ app: TrackedApplication) async {
+        withAnimation { applications.removeAll { $0.id == app.id } }
+        do {
+            try await MobileAPI().withdrawApplication(app.id)
+        } catch {
+            errorText = error.localizedDescription
+            await load()
         }
     }
 

@@ -325,7 +325,12 @@ final class AuthViewModel: ObservableObject {
     /// CV files, every RoleLantern record, and the sign-in account itself.
     func deleteAccount() async {
         do {
-            try await CandidateAPI().deleteAccount()
+            do {
+                try await MobileAPI().deleteAccount()
+            } catch let e as MobileAPIError where e.status >= 500 || e.status == 404 {
+                // Website unavailable: fall back to the app's own server function.
+                try await CandidateAPI().deleteAccount()
+            }
             UserDefaults.standard.removeObject(forKey: "lastKnownEmail")
             UserDefaults.standard.removeObject(forKey: PushManager.tokenKey)
             // The session is already invalid server-side; clear it locally.

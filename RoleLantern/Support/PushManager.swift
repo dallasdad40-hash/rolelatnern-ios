@@ -87,7 +87,9 @@ final class PushManager: NSObject, UIApplicationDelegate, UNUserNotificationCent
         #else
         let environment = "production"
         #endif
-        // Server-side: reassigns the token to whoever is signed in now.
+        // Preferred: the website's push-token endpoint. Fallback: the database function,
+        // which also reassigns the token to whoever is signed in now.
+        if (try? await MobileAPI().registerPushToken(token, environment: environment)) != nil { return }
         _ = try? await Supa.client.rpc("register_push_token",
                                        params: Params(p_token: token, p_environment: environment))
             .execute()
@@ -96,6 +98,7 @@ final class PushManager: NSObject, UIApplicationDelegate, UNUserNotificationCent
     /// Call on sign-out so this device stops receiving the previous user's alerts.
     static func removeToken() async {
         guard let token = UserDefaults.standard.string(forKey: tokenKey) else { return }
+        if (try? await MobileAPI().removePushToken(token)) != nil { return }
         _ = try? await Supa.client.from("device_push_tokens").delete().eq("token", value: token).execute()
     }
 

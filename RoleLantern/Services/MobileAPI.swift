@@ -276,3 +276,83 @@ extension MobileAPI {
         try await request("PATCH", "profile", body: patch)
     }
 }
+
+// MARK: - Job alerts (website alert engine sends the emails)
+
+struct JobAlertTriggers: Codable, Equatable {
+    var keywords: [String] = []
+    var functions: [String] = []
+    var therapeutic_areas: [String] = []
+    var categories: [String] = []
+    var states: [String] = []
+    var remote_status: String = "any"
+
+    init() {}
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        keywords = (try? c.decode([String].self, forKey: .keywords)) ?? []
+        functions = (try? c.decode([String].self, forKey: .functions)) ?? []
+        therapeutic_areas = (try? c.decode([String].self, forKey: .therapeutic_areas)) ?? []
+        categories = (try? c.decode([String].self, forKey: .categories)) ?? []
+        states = (try? c.decode([String].self, forKey: .states)) ?? []
+        remote_status = (try? c.decode(String.self, forKey: .remote_status)) ?? "any"
+    }
+
+    var hasCriteria: Bool {
+        !keywords.isEmpty || !functions.isEmpty || !therapeutic_areas.isEmpty
+            || !categories.isEmpty || !states.isEmpty || remote_status != "any"
+    }
+}
+
+struct JobAlert: Decodable, Identifiable, Equatable {
+    let id: UUID
+    var name: String
+    var triggers: JobAlertTriggers
+    var frequency: String
+    var status: String
+    let last_match_count: Int?
+    let last_sent_at: String?
+    let created_at: String?
+}
+
+struct AlertPreview: Decodable {
+    let count: Int
+    let top: [Item]?
+    struct Item: Decodable, Identifiable { let id: UUID; let title: String?; let company: String?; let location: String? }
+}
+
+extension MobileAPI {
+    func alerts() async throws -> [JobAlert] {
+        struct R: Decodable { let alerts: [JobAlert] }
+        let r: R = try await request("GET", "alerts")
+        return r.alerts
+    }
+
+    func createAlert(name: String, triggers: JobAlertTriggers, frequency: String) async throws -> JobAlert {
+        struct B: Encodable { let name: String; let triggers: JobAlertTriggers; let frequency: String }
+        struct R: Decodable { let alert: JobAlert }
+        let r: R = try await request("POST", "alerts", body: B(name: name, triggers: triggers, frequency: frequency))
+        return r.alert
+    }
+
+    func updateAlert(_ id: UUID, status: String? = nil, frequency: String? = nil) async throws {
+        struct B: Encodable { let status: String?; let frequency: String? }
+        let _: Empty = try await request("PATCH", "alerts/\(id.uuidString.lowercased())", body: B(status: status, frequency: frequency))
+    }
+
+    func deleteAlert(_ id: UUID) async throws {
+        let _: Empty = try await request("DELETE", "alerts/\(id.uuidString.lowercased())")
+    }
+
+    func previewAlert(_ t: JobAlertTriggers) async throws -> AlertPreview {
+        var q: [URLQueryItem] = []
+        func add(_ k: String, _ v: [String]) { if !v.isEmpty { q.append(URLQueryItem(name: k, value: v.joined(separator: ","))) } }
+        add("keywords", t.keywords)
+        add("functions", t.functions)
+        add("therapeutic_areas", t.therapeutic_areas)
+        add("categories", t.categories)
+        add("states", t.states)
+        if t.remote_status != "any" { q.append(URLQueryItem(name: "remote_status", value: t.remote_status)) }
+        return try await request("GET", "alerts/preview", query: q)
+    }
+}

@@ -64,6 +64,12 @@ struct ProfileView: View {
             }
             Divider().padding(.leading, 48)
             NavigationLink {
+                JobAlertsView()
+            } label: {
+                row("Job alerts", icon: "bell.badge")
+            }
+            Divider().padding(.leading, 48)
+            NavigationLink {
                 PrivacyCenterView()
             } label: {
                 row("All privacy settings", icon: "hand.raised")

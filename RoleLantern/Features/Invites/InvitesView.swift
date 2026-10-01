@@ -8,6 +8,7 @@ final class InvitesViewModel: ObservableObject {
     @Published var errorText: String?
 
     private let api = CandidateAPI()
+    private let mobile = MobileAPI()
 
     /// Last invite removed, kept briefly for Undo.
     @Published var recentlyRemoved: CandidateInvite?
@@ -49,9 +50,21 @@ final class InvitesViewModel: ObservableObject {
         }
     }
 
-    func respond(_ invite: CandidateInvite, accept: Bool) async -> Bool {
+    func accept(_ invite: CandidateInvite, shareCv: Bool) async -> Bool {
+        await run { try await self.mobile.acceptInvite(invite.id, shareCv: shareCv) }
+    }
+
+    func decline(_ invite: CandidateInvite) async -> Bool {
+        await run { try await self.mobile.declineInvite(invite.id) }
+    }
+
+    func stopSharing(_ invite: CandidateInvite) async -> Bool {
+        await run { try await self.mobile.revokeInvite(invite.id) }
+    }
+
+    private func run(_ work: @escaping () async throws -> Void) async -> Bool {
         do {
-            try await api.respond(to: invite, accept: accept)
+            try await work()
             await refresh()
             return true
         } catch {
@@ -175,7 +188,8 @@ struct InviteDetailView: View {
     @ObservedObject var vm: InvitesViewModel
     @Environment(\.dismiss) private var dismiss
 
-    @State private var confirmAccept = false
+    @State private var showConsent = false
+    @State private var confirmStop = false
     @State private var working = false
 
     var body: some View {
@@ -222,7 +236,7 @@ struct InviteDetailView: View {
                         Label("What accepting means", systemImage: "hand.raised")
                             .font(.subheadline.weight(.medium))
                             .foregroundColor(Brand.navy)
-                        Text("This employer sees your name, email and CV, and you're submitted as an applicant for this role. Other employers still see nothing. Declining keeps you completely anonymous.")
+                        Text("This employer sees your name, email and LinkedIn, and you're added as an applicant for this role. Your CV is only shared if you choose to. Other employers still see nothing. Declining keeps you anonymous.")
                             .font(.subheadline)
                             .foregroundColor(Brand.slate)
                     }
@@ -230,44 +244,79 @@ struct InviteDetailView: View {
                     .background(Brand.cream)
                     .cornerRadius(12)
 
-                    Button {
-                        confirmAccept = true
-                    } label: {
-                        if working { ProgressView().tint(.white) } else { Text("Accept and share my CV") }
-                    }
-                    .buttonStyle(PrimaryButtonStyle())
-                    .disabled(working)
+                    Button("Accept invite") { showConsent = true }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .disabled(working)
 
-                    Button("Decline") {
+                    Button {
                         Task {
                             working = true
-                            if await vm.respond(invite, accept: false) { dismiss() }
+                            if await vm.decline(invite) { dismiss() }
                             working = false
                         }
+                    } label: {
+                        if working { ProgressView() } else { Text("Decline") }
                     }
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(working)
                 } else {
                     InviteStatusChip(status: invite.status)
+                    if invite.status == "accepted" {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("You're sharing with \(invite.companyName ?? "this employer")", systemImage: "person.crop.circle.badge.checkmark")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundColor(Brand.navy)
+                            Text(invite.cvShared == true
+                                 ? "Your name, email, LinkedIn and CV."
+                                 : "Your name, email and LinkedIn. Not your CV.")
+                                .font(.subheadline)
+                                .foregroundColor(Brand.slate)
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Brand.surface)
+                        .cornerRadius(12)
+
+                        Button(role: .destructive) {
+                            confirmStop = true
+                        } label: {
+                            if working { ProgressView() } else { Text("Stop sharing my details") }
+                        }
+                        .buttonStyle(SecondaryButtonStyle())
+                        .disabled(working)
+                    }
                 }
             }
             .padding(20)
         }
         .navigationTitle("Invite")
         .navigationBarTitleDisplayMode(.inline)
-        .confirmationDialog(
-            "Share your name, email and CV with \(invite.companyName ?? "this employer")?",
-            isPresented: $confirmAccept,
-            titleVisibility: .visible
-        ) {
-            Button("Accept and share") {
+        .sheet(isPresented: $showConsent) {
+            InviteConsentSheet(companyName: invite.companyName ?? "this employer") { shareCv in
+                showConsent = false
                 Task {
                     working = true
-                    if await vm.respond(invite, accept: true) { dismiss() }
+                    if await vm.accept(invite, shareCv: shareCv) { dismiss() }
+                    working = false
+                }
+            }
+            .presentationDetents([.medium, .large])
+        }
+        .confirmationDialog(
+            "Stop sharing your details with \(invite.companyName ?? "this employer")?",
+            isPresented: $confirmStop,
+            titleVisibility: .visible
+        ) {
+            Button("Stop sharing", role: .destructive) {
+                Task {
+                    working = true
+                    if await vm.stopSharing(invite) { dismiss() }
                     working = false
                 }
             }
             Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("They lose access to your details and you're removed as an applicant for this role. The invite will show as declined.")
         }
         .alert("Invite", isPresented: .init(
             get: { vm.errorText != nil }, set: { if !$0 { vm.errorText = nil } }
@@ -289,6 +338,60 @@ struct InviteDestination: ViewModifier {
             }
         } else {
             content
+        }
+    }
+}
+
+/// Consent screen shown before accepting an invite. Matches the website: name, email
+/// and LinkedIn are shared; the CV only if the candidate ticks the box (unticked by default).
+struct InviteConsentSheet: View {
+    let companyName: String
+    let onAccept: (Bool) -> Void
+    @State private var shareCv = false
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Label("Your full name", systemImage: "person")
+                    Label("Your email", systemImage: "envelope")
+                    Label("Your LinkedIn", systemImage: "link")
+                } header: {
+                    Text("\(companyName) will see")
+                }
+
+                Section {
+                    Toggle(isOn: $shareCv) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Also share my CV").foregroundColor(Brand.navy)
+                            Text("Your CV includes your phone number and work history.")
+                                .font(.caption)
+                                .foregroundColor(Brand.slate)
+                        }
+                    }
+                    .tint(.green)
+                } footer: {
+                    Text("You can stop sharing at any time from this invite.")
+                }
+
+                Section {
+                    Button {
+                        onAccept(shareCv)
+                    } label: {
+                        Text(shareCv ? "Accept and share with my CV" : "Accept and share")
+                            .frame(maxWidth: .infinity)
+                            .fontWeight(.semibold)
+                    }
+                }
+            }
+            .navigationTitle("Accept invite")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
         }
     }
 }

@@ -49,9 +49,12 @@ struct CandidateInvite: Decodable, Identifiable, Hashable {
     let jobTitle: String?
     let companyName: String?
     let locationText: String?
+    /// For accepted invites: the CV went to the employer too.
+    let cvShared: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id, status, message
+        case cvShared = "cv_shared"
         case jobId = "job_id"
         case sentAt = "sent_at"
         case respondedAt = "responded_at"
@@ -197,12 +200,6 @@ struct CandidateAPI {
         struct R: Decodable { let invites: [CandidateInvite] }
         let r: R = try await call(Action(action: "invites"))
         return r.invites
-    }
-
-    func respond(to invite: CandidateInvite, accept: Bool) async throws {
-        struct B: Encodable { let action = "invite_respond"; let invite_id: String; let decision: String }
-        struct R: Decodable { let ok: Bool? }
-        let _: R = try await call(B(invite_id: invite.id.uuidString, decision: accept ? "accept" : "decline"))
     }
 
     // MARK: Remove from my lists (candidate view only)

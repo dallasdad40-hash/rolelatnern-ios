@@ -118,10 +118,14 @@ Deno.serve(async (req: Request) => {
         if (!(await isBlocked(admin, candidateId, inv.employer_id, companies[inv.employer_id]?.company_id ?? null))) visible.push(inv);
       }
       const jobs = await jobInfo(admin, visible.map((i) => i.job_id));
-      // Opening the inbox marks new invites as viewed.
-      const newIds = visible.filter((i) => i.status === 'sent').map((i) => i.id);
-      if (newIds.length) {
-        await admin.from('employer_candidate_invites').update({ status: 'viewed' }).in('id', newIds).eq('candidate_id', candidateId);
+      // Status stays 'sent' until answered: the website only accepts/declines 'sent' invites.
+      // For accepted invites, report whether the CV went with them (the application has a CV).
+      const acceptedJobIds = visible.filter((i) => i.status === 'accepted').map((i) => i.job_id);
+      const cvShared = new Set<string>();
+      if (acceptedJobIds.length) {
+        const { data: apps } = await admin.from('applications').select('job_id')
+          .eq('candidate_id', candidateId).in('job_id', acceptedJobIds).not('cv_file_id', 'is', null);
+        for (const a of apps ?? []) cvShared.add(a.job_id);
       }
       return json({
         invites: visible.map((i) => ({
@@ -129,57 +133,16 @@ Deno.serve(async (req: Request) => {
           job_title: jobs[i.job_id]?.job_title ?? null,
           company_name: companies[i.employer_id]?.name ?? jobs[i.job_id]?.company_name ?? null,
           location_text: jobs[i.job_id]?.location_text ?? null,
+          cv_shared: cvShared.has(i.job_id),
         })),
       });
     }
 
+    // Accept / decline / stop sharing now go through the website's mobile API
+    // (/api/mobile/invites/{id}/accept|decline|revoke) so consent matches the web:
+    // name, email and LinkedIn only, CV only if the candidate ticks the box.
     if (action === 'invite_respond') {
-      const inviteId: string = body.invite_id;
-      const decision: string = body.decision;
-      if (!inviteId || !['accept', 'decline'].includes(decision)) return json({ error: 'invite_id and decision required' }, 400);
-      const { data: inv } = await admin.from('employer_candidate_invites')
-        .select('id,job_id,employer_id,status').eq('id', inviteId).eq('candidate_id', candidateId).maybeSingle();
-      if (!inv) return json({ error: 'Invite not found.' }, 404);
-      const companies = await employerCompanies(admin, [inv.employer_id]);
-      if (await isBlocked(admin, candidateId, inv.employer_id, companies[inv.employer_id]?.company_id ?? null)) {
-        return json({ error: 'Invite not found.' }, 404);
-      }
-      if (!['sent', 'viewed'].includes(inv.status)) return json({ error: 'This invite was already answered.' }, 409);
-      const now = new Date().toISOString();
-
-      if (decision === 'decline') {
-        await admin.from('employer_candidate_invites').update({ status: 'declined', responded_at: now }).eq('id', inv.id);
-        return json({ ok: true, status: 'declined' });
-      }
-
-      // Accept: needs an active CV, because accepting shares it with the employer.
-      const { data: cv } = await admin.from('cv_files').select('id')
-        .eq('candidate_id', candidateId).is('deleted_at', null)
-        .order('uploaded_at', { ascending: false }).limit(1).maybeSingle();
-      if (!cv?.id) return json({ error: 'Upload a CV first. Accepting an invite shares your CV with the employer.' }, 422);
-
-      await admin.from('employer_candidate_invites').update({ status: 'accepted', responded_at: now }).eq('id', inv.id);
-      await admin.from('candidate_reveal_consents').insert({
-        candidate_id: candidateId, employer_id: inv.employer_id, job_id: null,
-        consent_type: 'invite_accept', revealed_fields: ['full_name', 'contact_email', 'cv'],
-      });
-      await admin.from('candidate_consent_events').insert({
-        candidate_id: candidateId, employer_id: inv.employer_id, job_id: inv.job_id,
-        consent_type: 'invite_to_apply_accepted', consent_version: 'ios-v1',
-        consent_text: 'Accepted invite to apply; identity and CV shared with this employer.', user_agent: ua,
-      });
-      if (inv.job_id) {
-        const { data: existing } = await admin.from('applications').select('id')
-          .eq('candidate_id', candidateId).eq('job_id', inv.job_id).eq('application_type', 'platform_application').maybeSingle();
-        if (!existing) {
-          await admin.from('applications').insert({
-            candidate_id: candidateId, job_id: inv.job_id, employer_id: inv.employer_id,
-            application_type: 'platform_application', status: 'submitted', cv_file_id: cv.id,
-            submitted_at: now, consent_at: now, consent_version: 'ios-v1',
-          });
-        }
-      }
-      return json({ ok: true, status: 'accepted' });
+      return json({ error: 'Please update the RoleLantern app to answer invites.' }, 410);
     }
 
     // ---------- Remove from my lists (candidate view only) ----------

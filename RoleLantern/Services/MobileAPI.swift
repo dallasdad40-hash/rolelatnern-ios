@@ -146,3 +146,28 @@ extension MobileAPI {
         try await request("PATCH", "privacy", body: patch)
     }
 }
+
+// MARK: - Invites (consent matches the website)
+
+extension MobileAPI {
+    struct AcceptResult: Decodable {
+        let accepted: Bool?
+        let cvShared: Bool?
+    }
+
+    /// Shares name, email and LinkedIn. The CV only goes too when `shareCv` is true.
+    @discardableResult
+    func acceptInvite(_ id: UUID, shareCv: Bool) async throws -> AcceptResult {
+        struct B: Encodable { let shareCv: Bool }
+        return try await request("POST", "invites/\(id.uuidString.lowercased())/accept", body: B(shareCv: shareCv))
+    }
+
+    func declineInvite(_ id: UUID) async throws {
+        let _: Empty = try await request("POST", "invites/\(id.uuidString.lowercased())/decline")
+    }
+
+    /// Stops sharing after an accept (removes the consent and the application it created).
+    func revokeInvite(_ id: UUID) async throws {
+        let _: Empty = try await request("POST", "invites/\(id.uuidString.lowercased())/revoke")
+    }
+}
